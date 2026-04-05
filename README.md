@@ -2,6 +2,13 @@
 
 A Bayesian approach to ancestry decomposition from Global25 (G25) PCA coordinates, using Markov Chain Monte Carlo sampling to produce full posterior distributions over admixture proportions — not just point estimates.
 
+**Now available in two versions:**
+
+- **R Script** — command-line tool for batch processing, scripting, and integration into research pipelines
+- **Web App** — browser-based interface with interactive charts, no installation required
+
+Both versions implement the same statistical engine: multi-strategy pre-selection, forward stepwise BIC model selection, and Metropolis-Hastings MCMC with Dirichlet priors. They produce equivalent results — choose based on your workflow.
+
 ## The Problem with Current Tools
 
 Tools like [Vahaduo](https://vahaduo.github.io/vahaduo/) are the standard front-end for working with G25 coordinates. They are fast, accessible, and have done an enormous amount to democratize population genetics for non-specialists. But under the hood, Vahaduo and similar calculators use **constrained least-squares optimization**: they find the weighted combination of source populations that minimizes the Euclidean distance to your target in 25-dimensional PCA space.
@@ -14,7 +21,7 @@ This is not a minor cosmetic issue. It leads to real misinterpretation. People c
 
 ## What This Tool Does Differently
 
-This script replaces the least-squares point estimate with **Bayesian inference via MCMC**, which treats each source population's contribution as a probability distribution rather than a fixed number.
+This tool replaces the least-squares point estimate with **Bayesian inference via MCMC**, which treats each source population's contribution as a probability distribution rather than a fixed number.
 
 The entire project was inspired by watching this video [The Algorithm That Made Modern AI Possible by StringsandTheory](https://www.youtube.com/watch?v=LDiklt4dV24).  After watching I wondered whether the techniques could be applied to admixture analysis.
 
@@ -61,7 +68,7 @@ G25 has 25 dimensions, but many ancient populations cluster together in PCA spac
 
 ### 3. Principled Source Selection
 
-The script uses a multi-stage approach to decide which and how many source populations to include:
+The tool uses a multi-stage approach to decide which and how many source populations to include:
 
 **Pre-selection** casts a wide net using four independent strategies run in parallel: a properly converged non-negative least-squares solver (coordinate descent, not the toy gradient descent used in naive implementations), greedy residual-chasing that iteratively finds sources explaining remaining residuals, Euclidean nearest-neighbor distance, and directional cosine similarity. Any source flagged by any method is kept as a candidate. This avoids the failure mode where a source is individually distant from the target but essential for the mixture — the classic example being Western Hunter-Gatherers in a modern European model.
 
@@ -73,13 +80,70 @@ The Dirichlet prior concentration parameter (`--alpha`) acts as a built-in regul
 
 ### 5. Convergence Diagnostics
 
-The script includes built-in diagnostics so you can verify that the MCMC chain has actually converged and the results are trustworthy:
+Both versions include built-in diagnostics so you can verify that the MCMC chain has actually converged and the results are trustworthy:
 
 - **Effective Sample Size (ESS)**: How many independent samples the chain is actually providing after accounting for autocorrelation. Low ESS means the chain needs to run longer.
 - **Geweke diagnostic**: A z-test comparing the mean of the first 10% of the chain to the last 50%. Values with |z| > 2 suggest the chain hasn't reached stationarity.
 - **Trace plots**: Visual inspection of the chain's behavior over time. A well-mixed chain looks like white noise; a poorly-mixed chain shows trends, drift, or sticky patches.
 
-## Installation
+---
+
+## Choosing a Version
+
+Both versions produce equivalent statistical results. The difference is in workflow and output format.
+
+| Aspect | R Script | Web App |
+|---|---|---|
+| Installation | Requires R | None — open HTML in any browser |
+| Interface | Command-line | Point-and-click with paste/upload |
+| Input | CSV files on disk | Paste data or upload CSV |
+| Output | CSV files + multi-page PDF | Inline tables and interactive charts |
+| Batch processing | Yes (scripting, multiple targets) | One run at a time |
+| Automation | Integrates into pipelines | Manual |
+| Offline use | Yes | Yes (single HTML file, no server) |
+| Best for | Researchers, batch runs, reproducible pipelines | Quick exploration, sharing results, no-install usage |
+
+### Visual Comparison
+
+The two versions present the same underlying data in different formats. Below are example outputs from each version using the same input data.
+
+#### Web App
+
+The web interface accepts pasted or uploaded G25 data and exposes all parameters as form controls. Results render inline with interactive charts.
+
+**Input and run log:**
+
+![Web app input interface showing pasted G25 data, parameter controls, and MCMC run log](screenshots/G25_Bayesian_input.JPG)
+
+**Results — summary table, diagnostics cards, admixture bar chart, and posterior densities:**
+
+![Web app results showing data table, fit metrics, horizontal bar chart with credible intervals, and posterior density plots](screenshots/G25_Bayesian_results.JPG)
+
+**Results — trace plots, log-posterior trace, and convergence diagnostics table:**
+
+![Web app results continued showing component trace plots, log-posterior trace, and convergence diagnostics table](screenshots/G25_Bayesian_results2.JPG)
+
+#### R Script (PDF Output)
+
+The R script outputs a multi-page PDF with publication-style plots.
+
+**Admixture composition (bar chart with credible intervals):**
+
+![R script PDF output showing horizontal bar chart of admixture proportions with shaded 95% credible interval bands](screenshots/k8_comp.JPG)
+
+**Posterior distributions:**
+
+![R script PDF output showing posterior density plots for four source populations with mean lines and credible interval boundaries](screenshots/k8_posterior.JPG)
+
+**Convergence diagnostics (ESS bar chart and Geweke z-score plot):**
+
+![R script PDF output showing ESS bar chart with quality thresholds and Geweke z-score convergence plot](screenshots/k8_conv.JPG)
+
+---
+
+## R Script Version
+
+### Installation
 
 No installation required beyond base R. The script has **zero external package dependencies** — it runs on any system with R installed, including older R versions (tested on R 4.3).
 
@@ -88,9 +152,9 @@ No installation required beyond base R. The script has **zero external package d
 which Rscript
 ```
 
-## Usage
+### Usage
 
-### Input Format
+#### Input Format
 
 Standard G25 CSV format, compatible with Vahaduo and other G25 tools. No header row. The first column contains `Population:SampleName` labels (colon-delimited), followed by 25 numeric columns of PCA coordinates.
 
@@ -103,7 +167,7 @@ WHG:Loschbour__BC_6100__Cov_99.10%,0.081,-0.063,...
 
 You need two files: a **source file** containing the reference populations, and a **target file** containing the individual(s) you want to model.
 
-### Basic Usage
+#### Basic Usage
 
 ```bash
 Rscript g25_bayesian_mcmc.R \
@@ -113,7 +177,7 @@ Rscript g25_bayesian_mcmc.R \
   --out my_results
 ```
 
-### Full Options
+#### Full Options
 
 ```
 Required:
@@ -133,14 +197,14 @@ Options:
   --seed     Random seed                                   [default: 42]
 ```
 
-### Population vs. Sample Mode
+#### Population vs. Sample Mode
 
 Like Vahaduo's aggregation toggle:
 
 - `--mode population` averages all samples within each population before fitting. Use this when your references contain many samples per population and you want to model against population centroids.
 - `--mode sample` treats each sample as an independent source. Use this when you want finer granularity or when populations contain only one sample each.
 
-### Output Files
+#### Output Files
 
 For each target individual, the script produces:
 
@@ -153,7 +217,49 @@ For each target individual, the script produces:
 
 If multiple targets are provided, each gets its own set of output files (`_target1_`, `_target2_`, etc.) plus a combined summary CSV.
 
+---
+
+## Web App Version
+
+### Getting Started
+
+1. Open `g25_bayesian_mcmc.html` in any modern browser (Chrome, Firefox, Safari, Edge).
+2. Paste your G25 source data into the left panel (or upload a CSV file).
+3. Paste your target data into the right panel (or upload a CSV file).
+4. Adjust parameters if desired (defaults match the R script).
+5. Click **Run MCMC**.
+
+The input format is identical to the R script — standard G25 CSV with `Population:SampleName` in the first column followed by 25 coordinate values. Both comma-separated and tab-separated formats are supported.
+
+### What You See
+
+Results render inline below the run log:
+
+- **Summary table** with mean, median, SD, 95% credible intervals, and significance flags for each source
+- **Diagnostics cards** showing fit RMSE, acceptance rate, chain length, and number of sources selected
+- **Admixture composition bar chart** with solid bars for posterior means and faded bars for 95% credible intervals
+- **Posterior density plots** with kernel density estimation, mean lines, and CI boundaries
+- **Component trace plots** for visual convergence assessment
+- **Log-posterior trace** with burn-in boundary marker
+- **Convergence diagnostics table** with ESS and Geweke z-scores
+
+### Technical Notes
+
+The web version runs entirely client-side — no data is sent to any server. The entire MCMC engine, NNLS solver, pre-selection pipeline, and visualization code are contained in a single HTML file. This means:
+
+- **Privacy**: Your genetic data never leaves your browser.
+- **Offline use**: Save the HTML file locally and it works without an internet connection (fonts will fall back to system defaults).
+- **Performance**: For large iteration counts (100k+), the browser's main thread may block briefly during MCMC sampling. For very heavy runs, the R script version is recommended.
+
+### Parameters
+
+All parameters from the R script are exposed as form controls in the web interface. Hover labels match the command-line flag names. Defaults are identical between versions.
+
+---
+
 ## Tuning Guide
+
+These recommendations apply to both versions.
 
 ### Sigma (σ) — Likelihood Noise
 
@@ -167,7 +273,7 @@ This controls how tightly the model demands the weighted combination match your 
 
 Controls the prior preference for sparse vs. distributed solutions.
 
-- `1.0` (default): Uniform prior. All possible weight combinations are equally likely. Lets the data speak entirely for itself.
+- `1.0` (default): Uniform prior. All possible weight combinations are equally likely *a priori*. Lets the data speak entirely for itself.
 - `0.5`: Mildly sparse. Encourages the model to push small, uncertain components toward zero. Good when you suspect overfitting.
 - `0.1`: Strongly sparse. Aggressively favors solutions with few dominant components. Use with caution — can suppress real minor ancestry.
 - `2.0+`: Anti-sparse. Favors solutions where weight is distributed more evenly. Rarely useful for admixture modeling.
@@ -184,7 +290,7 @@ How many candidate sources survive the pre-selection filter before forward stepw
 
 - `50,000` (default): Usually sufficient for well-separated sources with K ≤ 8.
 - `100,000–200,000`: Recommended if diagnostics show low ESS or failed Geweke tests.
-- Check the diagnostics file — if ESS < 200 for any active component, increase iterations.
+- Check the diagnostics — if ESS < 200 for any active component, increase iterations.
 
 ## Limitations and Caveats
 
@@ -192,7 +298,7 @@ How many candidate sources survive the pre-selection filter before forward stepw
 
 **This is not a replacement for formal admixture analysis.** It is a more statistically principled replacement for the least-squares fitting that tools like Vahaduo perform on PCA coordinates. The underlying data (G25 coordinates) and the fundamental modeling assumption (target = weighted sum of sources) are the same.
 
-**Computational cost scales with reference set size.** The pre-selection step involves solving NNLS against all sources, which takes a few minutes for ~5,000 populations and scales roughly linearly. The MCMC step itself is fast since it operates on the reduced candidate set.
+**Computational cost scales with reference set size.** The pre-selection step involves solving NNLS against all sources, which takes a few minutes for ~5,000 populations and scales roughly linearly. The MCMC step itself is fast since it operates on the reduced candidate set. In the web version, very large reference sets may cause the browser to lag during pre-selection.
 
 **The model assumes the "true" sources are in your reference set.** If your actual ancestry includes a population not represented in the references, the model will approximate it as a mixture of whatever is available — just like Vahaduo does. The credible intervals will be wider in this case, which is at least more honest than a confident wrong answer.
 
@@ -207,8 +313,8 @@ How many candidate sources survive the pre-selection filter before forward stepw
 | Regularization | None | Dirichlet prior (adjustable sparsity) |
 | Convergence verification | N/A | ESS, Geweke diagnostic, trace plots |
 | Speed | Instant | Minutes (depending on iterations and reference set size) |
-| Dependencies | Web browser | Base R only |
-| Ease of use | Very easy (GUI) | Command-line |
+| Dependencies | Web browser | Base R (script) or web browser (web app) |
+| Ease of use | Very easy (GUI) | GUI (web) or command-line (R) |
 
 ## Relationship to Other Methods
 
@@ -220,6 +326,21 @@ How many candidate sources survive the pre-selection filter before forward stepw
 
 This tool occupies a specific niche: bringing Bayesian uncertainty quantification to the PCA-coordinate-based admixture fitting that the ancient DNA hobbyist community already uses daily.
 
+## Repository Structure
+
+```
+├── g25_bayesian_mcmc.R          # R script (command-line version)
+├── g25_bayesian_mcmc.html       # Web app (browser version, single file)
+├── README.md
+├── screenshots/
+│   ├── G25_Bayesian_input.JPG   # Web app: input interface
+│   ├── G25_Bayesian_results.JPG # Web app: results (table, charts, densities)
+│   ├── G25_Bayesian_results2.JPG# Web app: results (traces, diagnostics)
+│   ├── k8_comp.JPG              # R script: admixture composition PDF
+│   ├── k8_posterior.JPG         # R script: posterior distributions PDF
+│   └── k8_conv.JPG              # R script: convergence diagnostics PDF
+```
+
 ## License
 
 MIT
@@ -229,7 +350,8 @@ MIT
 Issues and pull requests are welcome. Particular areas where contributions would be valuable:
 
 - Performance optimization for very large reference sets (10,000+ populations)
+- Web Worker threading for the web version to prevent UI blocking during long MCMC runs
 - Multiple independent chains with Gelman-Rubin (R-hat) convergence diagnostics
 - Hierarchical priors that encode known phylogenetic relationships between source populations
 - Variational inference as a fast approximate alternative to full MCMC
-- A web-based front-end comparable to Vahaduo's interface
+- Export functionality in the web version (CSV download of posterior samples)

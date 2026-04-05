@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G25 Bayesian MCMC Admixture Estimator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600;700&family=Fraunces:wght@400;600;700;900&display=swap');
+
+:root {
+  --bg: #0c0e12;
+  --bg2: #13161c;
+  --bg3: #1a1e26;
+  --bg4: #222730;
+  --surface: #1e222b;
+  --border: #2a2f3a;
+  --border2: #353b48;
+  --text: #e2e4e9;
+  --text2: #9ca0ab;
+  --text3: #6b7080;
+  --accent: #5b8af5;
+  --accent2: #3d6de0;
+  --accent-glow: rgba(91,138,245,0.15);
+  --green: #4ade80;
+  --red: #f87171;
+  --orange: #fb923c;
+  --yellow: #fbbf24;
+  --purple: #a78bfa;
+  --cyan: #22d3ee;
+  --pink: #f472b6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+.app-header {
+  padding: 2rem 2rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+}
+
+.app-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.app-header p {
+  color: var(--text3);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 300;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 4rem;
+}
+
+/* ── Input Section ── */
+.input-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .input-grid { grid-template-columns: 1fr; }
+}
+
+.input-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.input-card h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.input-card h3 .dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tab-row {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg3);
+  color: var(--text3);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn.active {
+  background: var(--accent2);
+  color: white;
+}
+
+.tab-btn:hover:not(.active) {
+  background: var(--bg4);
+  color: var(--text2);
+}
+
+textarea {
+  width: 100%;
+  min-height: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  padding: 0.75rem;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+textarea::placeholder { color: var(--text3); }
+
+.file-drop {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg);
+  color: var(--text3);
+  font-size: 0.8rem;
+  position: relative;
+}
+
+.file-drop:hover, .file-drop.dragover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--text2);
+}
+
+.file-drop input[type=file] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-drop .loaded {
+  color: var(--green);
+  font-weight: 500;
+}
+
+/* ── Parameters ── */
+.params-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  align-items: end;
+}
+
+.param-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.param-group label {
+  font-size: 0.65rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.param-group input[type=number],
+.param-group select {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  width: 100px;
+  outline: none;
+}
+
+.param-group input:focus, .param-group select:focus {
+  border-color: var(--accent);
+}
+
+.param-group select { width: 130px; }
+
+.run-btn {
+  background: var(--accent2);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 2rem;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.02em;
+}
+
+.run-btn:hover:not(:disabled) {
+  background: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+
+.run-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Log ── */
+#log-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  line-height: 1.7;
+  color: var(--text2);
+  display: none;
+}
+
+#log-panel.visible { display: block; }
+
+.log-header { color: var(--accent); font-weight: 600; }
+.log-step { color: var(--yellow); }
+.log-ok { color: var(--green); }
+.log-warn { color: var(--orange); }
+.log-err { color: var(--red); }
+
+/* ── Results ── */
+#results-section { display: none; }
+#results-section.visible { display: block; }
+
+.results-header {
+  font-family: 'Fraunces', serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-block {
+  margin-bottom: 2.5rem;
+}
+
+.result-block h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg2);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+
+/* ── Tables ── */
+.data-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+table.data-table th {
+  background: var(--bg3);
+  color: var(--text2);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+
+table.data-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+table.data-table tr:last-child td { border-bottom: none; }
+
+table.data-table tr:hover td { background: var(--bg3); }
+
+.sig-yes { color: var(--green); font-weight: 600; }
+.sig-no { color: var(--text3); }
+
+/* ── Charts ── */
+.chart-container {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.chart-container h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+
+canvas { max-width: 100%; }
+
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .chart-row { grid-template-columns: 1fr; }
+}
+
+/* ── Diagnostics ── */
+.diag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.diag-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.diag-card .label {
+  font-size: 0.65rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.25rem;
+}
+
+.diag-card .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.diag-card .value.good { color: var(--green); }
+.diag-card .value.warn { color: var(--orange); }
+.diag-card .value.bad { color: var(--red); }
+
+/* ── Progress ── */
+.progress-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  border-radius: 2px;
+  transition: width 0.3s;
+  width: 0%;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <h1>G25 Bayesian MCMC Admixture Estimator</h1>
+  <p>posterior distributions over ancestry proportions via Metropolis-Hastings &middot; no server required</p>
+</div>
+
+<div class="container">
+
+  <!-- ═══ Input Section ═══ -->
+  <div class="input-grid">
+    <div class="input-card">
+      <h3><span class="dot"></span> Source Populations</h3>
+      <div class="tab-row">
+        <button class="tab-btn active" onclick="switchTab('source','paste',this)">Paste</button>
+        <button class="tab-btn" onclick="switchTab('source','upload',this)">Upload CSV</button>
+      </div>
+      <div id="source-paste">
+        <textarea id="source-text" placeholder="Pop1:Sample1, 0.123, -0.045, 0.067, ...&#10;Pop1:Sample2, 0.125, -0.043, 0.069, ...&#10;Pop2:Sample1, 0.200, 0.010, -0.030, ...&#10;&#10;One row per sample. Column 1 = Population:SampleName, Columns 2-26 = G25 coords."></textarea>
+      </div>
+      <div id="source-upload" style="display:none">
+        <div class="file-drop" id="source-drop">
+          <span id="source-drop-label">Drop CSV here or click to browse</span>
+          <input type="file" accept=".csv,.txt" onchange="handleFile(this,'source')">
+        </div>
+      </div>
+    </div>
+
+    <div class="input-card">
+      <h3><span class="dot"></span> Target Individual(s)</h3>
+      <div class="tab-row">
+        <button class="tab-btn active" onclick="switchTab('target','paste',this)">Paste</button>
+        <button class="tab-btn" onclick="switchTab('target','upload',this)">Upload CSV</button>
+      </div>
+      <div id="target-paste">
+        <textarea id="target-text" placeholder="MyAncestry:Me, 0.150, -0.020, 0.045, ...&#10;&#10;One row per target. Same format as sources."></textarea>
+      </div>
+      <div id="target-upload" style="display:none">
+        <div class="file-drop" id="target-drop">
+          <span id="target-drop-label">Drop CSV here or click to browse</span>
+          <input type="file" accept=".csv,.txt" onchange="handleFile(this,'target')">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Parameters ═══ -->
+  <div class="params-row">
+    <div class="param-group">
+      <label>Mode</label>
+      <select id="param-mode">
+        <option value="population">Population</option>
+        <option value="sample">Sample</option>
+      </select>
+    </div>
+    <div class="param-group">
+      <label>Iterations</label>
+      <input type="number" id="param-iter" value="50000" min="1000" step="1000">
+    </div>
+    <div class="param-group">
+      <label>Burn-in</label>
+      <input type="number" id="param-burnin" value="10000" min="100" step="1000">
+    </div>
+    <div class="param-group">
+      <label>Thin</label>
+      <input type="number" id="param-thin" value="10" min="1">
+    </div>
+    <div class="param-group">
+      <label>Max K</label>
+      <input type="number" id="param-maxk" value="0" min="0" max="20">
+    </div>
+    <div class="param-group">
+      <label>Pre-select N</label>
+      <input type="number" id="param-nkeep" value="25" min="2" max="100">
+    </div>
+    <div class="param-group">
+      <label>Sigma</label>
+      <input type="number" id="param-sigma" value="0.01" min="0.0001" step="0.001">
+    </div>
+    <div class="param-group">
+      <label>Alpha</label>
+      <input type="number" id="param-alpha" value="1.0" min="0.01" step="0.1">
+    </div>
+    <div class="param-group">
+      <label>Seed</label>
+      <input type="number" id="param-seed" value="42" min="1">
+    </div>
+    <div class="param-group" style="align-self:end">
+      <button class="run-btn" id="run-btn" onclick="runAnalysis()">Run MCMC</button>
+    </div>
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-wrap" style="display:none">
+    <div class="progress-bar-fill" id="progress-fill"></div>
+  </div>
+
+  <!-- ═══ Log ═══ -->
+  <div id="log-panel"></div>
+
+  <!-- ═══ Results ═══ -->
+  <div id="results-section"></div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB / FILE HANDLING
+// ═══════════════════════════════════════════════════════════════════════════
+
+function switchTab(which, mode, btn) {
+  const parent = btn.parentElement;
+  parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(which + '-paste').style.display = mode === 'paste' ? '' : 'none';
+  document.getElementById(which + '-upload').style.display = mode === 'upload' ? '' : 'none';
+}
+
+function handleFile(input, which) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById(which + '-text').value = e.target.result;
+    document.getElementById(which + '-drop-label').innerHTML = '<span class="loaded">✓ ' + file.name + ' loaded</span>';
+  };
+  reader.readAsText(file);
+}
+
+// drag-over styling
+['source-drop','target-drop'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('dragover'); });
+  el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('dragover'); });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEEDED PRNG (Mulberry32)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = t + Math.imul(t ^ (t >>> 7), 61 | t) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let rand = mulberry32(42);
+
+// Box-Muller for normal samples
+function randNormal() {
+  let u, v, s;
+  do { u = 2 * rand() - 1; v = 2 * rand() - 1; s = u*u + v*v; } while (s >= 1 || s === 0);
+  return u * Math.sqrt(-2 * Math.log(s) / s);
+}
+
+// Gamma variate (Marsaglia & Tsang)
+function randGamma(shape) {
+  if (shape < 1) {
+    return randGamma(shape + 1) * Math.pow(rand(), 1 / shape);
+  }
+  const d = shape - 1/3;
+  const c = 1 / Math.sqrt(9 * d);
+  while (true) {
+    let x, v;
+    do { x = randNormal(); v = 1 + c * x; } while (v <= 0);
+    v = v * v * v;
+    const u = rand();
+    if (u < 1 - 0.0331 * (x*x) * (x*x)) return d * v;
+    if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA PARSING
+// ═══════════════════════════════════════════════════════════════════════════
+
+function parseG25(text) {
+  const lines = text.trim().split('\n').filter(l => l.trim().length > 0);
+  const labels = [], populations = [], samples = [], coords = [];
+  for (const line of lines) {
+    // handle both comma and tab delimiters
+    const parts = line.indexOf('\t') >= 0 ? line.split('\t') : line.split(',');
+    const label = parts[0].trim();
+    const vals = parts.slice(1).map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+    if (vals.length < 2) continue;
+    labels.push(label);
+    const sp = label.split(':');
+    populations.push(sp[0]);
+    samples.push(sp.length > 1 ? sp.slice(1).join(':') : sp[0]);
+    coords.push(vals);
+  }
+  return { labels, populations, samples, coords };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LINEAR ALGEBRA HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]*b[i]; return s; }
+function vecSub(a, b) { return a.map((v,i) => v - b[i]); }
+function vecNorm(a) { return Math.sqrt(dot(a, a)); }
+
+// matrix multiply: rows of A by cols of B  (A = array of row arrays)
+function matVecMul(mat, vec) {
+  return mat.map(row => dot(row, vec));
+}
+
+// weighted combination: w (length K) * sourceMat (K rows x D cols) => D-vector
+function weightedSum(w, sourceMat) {
+  const D = sourceMat[0].length;
+  const result = new Float64Array(D);
+  for (let k = 0; k < w.length; k++) {
+    for (let d = 0; d < D; d++) result[d] += w[k] * sourceMat[k][d];
+  }
+  return Array.from(result);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NNLS SOLVER (coordinate descent, simplex-constrained)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function solveNNLS(targetVec, sourceMat, maxIter = 2000, tol = 1e-8) {
+  const K = sourceMat.length;
+  const D = targetVec.length;
+
+  // Precompute StS and Sty
+  const StS = [];
+  for (let i = 0; i < K; i++) {
+    StS[i] = new Float64Array(K);
+    for (let j = 0; j < K; j++) {
+      StS[i][j] = dot(sourceMat[i], sourceMat[j]);
+    }
+  }
+  const Sty = sourceMat.map(s => dot(s, targetVec));
+
+  const w = new Float64Array(K);
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    let maxChange = 0;
+    for (let k = 0; k < K; k++) {
+      let residual_k = Sty[k];
+      for (let j = 0; j < K; j++) residual_k -= StS[k][j] * w[j];
+      residual_k += StS[k][k] * w[k];
+      const newVal = Math.max(0, residual_k / StS[k][k]);
+      maxChange = Math.max(maxChange, Math.abs(newVal - w[k]));
+      w[k] = newVal;
+    }
+    // Normalise to simplex
+    let s = 0;
+    for (let k = 0; k < K; k++) s += w[k];
+    if (s > 0) for (let k = 0; k < K; k++) w[k] /= s;
+
+    if (maxChange < tol) break;
+  }
+  return Array.from(w);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRE-SELECTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+function residualChase(targetVec, sourceMat, nRounds = 12) {
+  const K = sourceMat.length;
+  const selected = [];
+  let residual = targetVec.slice();
+
+  for (let round = 0; round < nRounds; round++) {
+    let bestJ = -1, bestRSS = Infinity;
+    for (let j = 0; j < K; j++) {
+      if (selected.includes(j)) continue;
+      const trial = [...selected, j];
+      const trialMat = trial.map(i => sourceMat[i]);
+      const wTrial = solveNNLS(targetVec, trialMat, 500);
+      const pred = weightedSum(wTrial, trialMat);
+      const rss = dot(vecSub(targetVec, pred), vecSub(targetVec, pred));
+      if (rss < bestRSS) { bestRSS = rss; bestJ = j; }
+    }
+    if (bestJ < 0 || selected.includes(bestJ)) break;
+    selected.push(bestJ);
+
+    const trialMat = selected.map(i => sourceMat[i]);
+    const wTrial = solveNNLS(targetVec, trialMat, 500);
+    residual = vecSub(targetVec, weightedSum(wTrial, trialMat));
+    if (vecNorm(residual) < 1e-6) break;
+  }
+  return selected;
+}
+
+function preselectSources(targetVec, sourceMat, sourceNames, nKeep, log) {
+  const K = sourceMat.length;
+  log('step', `  Pre-selecting from ${K} sources...`);
+
+  // Method 1: distance
+  const dists = sourceMat.map(s => vecNorm(vecSub(targetVec, s)));
+  const distOrder = [...Array(K).keys()].sort((a,b) => dists[a]-dists[b]);
+  const distTop = distOrder.slice(0, Math.min(nKeep, K));
+  log('', `    Distance: ${distTop.length} candidates`);
+
+  // Method 2: NNLS
+  const wNNLS = solveNNLS(targetVec, sourceMat, 2000);
+  const nnlsActive = [];
+  for (let i = 0; i < K; i++) if (wNNLS[i] > 1e-4) nnlsActive.push(i);
+  const nnlsOrder = [...Array(K).keys()].sort((a,b) => wNNLS[b]-wNNLS[a]);
+  const nnlsTop = nnlsOrder.slice(0, Math.min(nKeep, K));
+  const nnlsSet = [...new Set([...nnlsActive, ...nnlsTop])];
+  log('', `    NNLS: ${nnlsActive.length} active, ${nnlsSet.length} total`);
+
+  // Method 3: residual chase
+  const chaseSet = residualChase(targetVec, sourceMat, 12);
+  log('', `    Residual chase: ${chaseSet.length} candidates`);
+
+  // Method 4: direction
+  const tNorm = vecNorm(targetVec) + 1e-15;
+  const targetUnit = targetVec.map(v => v / tNorm);
+  const cosSim = sourceMat.map(s => dot(s, targetUnit) / (vecNorm(s) + 1e-15));
+  const dirOrder = [...Array(K).keys()].sort((a,b) => cosSim[b]-cosSim[a]);
+  const dirTop = dirOrder.slice(0, Math.min(Math.ceil(nKeep/3), K));
+
+  // Combine
+  let allCandidates = [...new Set([...nnlsSet, ...chaseSet, ...distTop, ...dirTop])];
+
+  if (allCandidates.length > nKeep) {
+    const scores = allCandidates.map(i => wNNLS[i] * 1000 + 1 / (dists[i] + 0.001));
+    const scored = allCandidates.map((idx, i) => ({idx, score: scores[i]}));
+    scored.sort((a,b) => b.score - a.score);
+    allCandidates = scored.slice(0, nKeep).map(s => s.idx);
+  }
+
+  log('ok', `  => Pre-selected ${allCandidates.length} candidates`);
+  log('', `  Candidates: ${allCandidates.map(i => sourceNames[i]).join(', ')}`);
+
+  const subMat = allCandidates.map(i => sourceMat[i]);
+  const subW = solveNNLS(targetVec, subMat, 2000);
+
+  return { indices: allCandidates, initialWeights: subW };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FORWARD STEPWISE SELECTION (BIC)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function computeBIC(targetVec, sourceMat, w, sigma, kActive) {
+  const pred = weightedSum(w, sourceMat);
+  const resid = vecSub(targetVec, pred);
+  const rss = dot(resid, resid);
+  const n = targetVec.length;
+  const logLik = -n/2 * Math.log(2 * Math.PI * sigma * sigma) - rss / (2 * sigma * sigma);
+  return -2 * logLik + (kActive - 1) * Math.log(n);
+}
+
+function forwardSelect(targetVec, sourceMat, sourceNames, sigma, maxK, minK, log) {
+  const K = sourceMat.length;
+  maxK = Math.min(maxK, K);
+  const selected = [];
+  let remaining = [...Array(K).keys()];
+  let bestBicOverall = Infinity;
+  let bestSet = null;
+  const bicTrail = [];
+  const stepLog = [];
+
+  log('step', `  Forward stepwise (up to K=${maxK})...`);
+
+  for (let step = 0; step < maxK; step++) {
+    let bestBicStep = Infinity, bestAdd = -1;
+
+    for (const j of remaining) {
+      const trial = [...selected, j];
+      const trialMat = trial.map(i => sourceMat[i]);
+      const wTrial = solveNNLS(targetVec, trialMat, 1000);
+      const bic = computeBIC(targetVec, trialMat, wTrial, sigma, trial.length);
+      if (bic < bestBicStep) { bestBicStep = bic; bestAdd = j; }
+    }
+
+    selected.push(bestAdd);
+    remaining = remaining.filter(r => r !== bestAdd);
+    bicTrail.push(bestBicStep);
+
+    const trialMat = selected.map(i => sourceMat[i]);
+    const wTrial = solveNNLS(targetVec, trialMat, 1000);
+    const pred = weightedSum(wTrial, trialMat);
+    const rmse = Math.sqrt(dot(vecSub(targetVec, pred), vecSub(targetVec, pred)) / targetVec.length);
+
+    const line = `K=${(step+1).toString().padStart(2)}  BIC=${bestBicStep.toFixed(2).padStart(9)}  RMSE=${rmse.toFixed(6)}  +${sourceNames[bestAdd]} (${(wTrial[wTrial.length-1]*100).toFixed(1)}%)`;
+    stepLog.push(line);
+    log('', `    ${line}`);
+
+    if (bestBicStep < bestBicOverall) {
+      bestBicOverall = bestBicStep;
+      bestSet = selected.slice();
+    }
+
+    if (bicTrail.length >= 4) {
+      const recent = bicTrail.slice(-3);
+      if (recent[1] > recent[0] && recent[2] > recent[1]) {
+        log('', `    (BIC increasing, stopping)`);
+        stepLog.push('(BIC increasing, stopping)');
+        break;
+      }
+    }
+  }
+
+  if (!bestSet || bestSet.length < minK) {
+    bestSet = selected.slice(0, Math.min(minK, selected.length));
+  }
+
+  log('ok', `  => Selected K=${bestSet.length} sources`);
+
+  const finalMat = bestSet.map(i => sourceMat[i]);
+  const finalW = solveNNLS(targetVec, finalMat, 2000);
+
+  return { indices: bestSet, weights: finalW, stepLog };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BAYESIAN MODEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+function logLikelihood(w, targetVec, sourceMat, sigma) {
+  const pred = weightedSum(w, sourceMat);
+  let ss = 0;
+  for (let i = 0; i < targetVec.length; i++) {
+    const r = targetVec[i] - pred[i];
+    ss += r * r;
+  }
+  return -ss / (2 * sigma * sigma);
+}
+
+function logPriorDirichlet(w, alpha) {
+  for (let i = 0; i < w.length; i++) if (w[i] <= 0) return -Infinity;
+  let s = 0;
+  for (let i = 0; i < w.length; i++) s += Math.log(w[i]);
+  return (alpha - 1) * s;
+}
+
+function logPosterior(w, targetVec, sourceMat, sigma, alpha) {
+  const lp = logPriorDirichlet(w, alpha);
+  if (!isFinite(lp)) return -Infinity;
+  return lp + logLikelihood(w, targetVec, sourceMat, sigma);
+}
+
+function proposeDirichlet(wCurrent, concentration) {
+  const alphaProp = wCurrent.map(v => Math.max(0.01, concentration * v));
+  let proposed = alphaProp.map(a => randGamma(a));
+  const s = proposed.reduce((a,b) => a+b, 0);
+  proposed = proposed.map(v => v / s);
+  return { w: proposed, alphaUsed: alphaProp };
+}
+
+function logDirichletDensity(x, alphaVec) {
+  for (let i = 0; i < x.length; i++) if (x[i] <= 0) return -Infinity;
+  let s1 = 0, s2 = 0, s3 = 0;
+  for (let i = 0; i < x.length; i++) {
+    s1 += (alphaVec[i] - 1) * Math.log(x[i]);
+    s2 += lgamma(alphaVec[i]);
+    s3 += alphaVec[i];
+  }
+  return s1 - s2 + lgamma(s3);
+}
+
+// Log-gamma (Stirling approx + Lanczos for small values)
+function lgamma(x) {
+  if (x <= 0) return Infinity;
+  // Lanczos approximation
+  const g = 7;
+  const c = [0.99999999999980993,676.5203681218851,-1259.1392167224028,
+    771.32342877765313,-176.61502916214059,12.507343278686905,
+    -0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
+  let xx = x;
+  if (xx < 0.5) {
+    return Math.log(Math.PI / Math.sin(Math.PI * xx)) - lgamma(1 - xx);
+  }
+  xx -= 1;
+  let a = c[0];
+  const t = xx + g + 0.5;
+  for (let i = 1; i < g + 2; i++) a += c[i] / (xx + i);
+  return 0.5 * Math.log(2 * Math.PI) + (xx + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MCMC SAMPLER
+// ═══════════════════════════════════════════════════════════════════════════
+
+function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, alpha, log, progressCb) {
+  const K = sourceMat.length;
+  let wCurrent = new Array(K).fill(1/K);
+  const nSave = Math.floor((nIter - burnin) / thin);
+  const chain = [];
+  const logPostTrace = new Float64Array(nIter);
+  let acceptCount = 0;
+  let conc = 500;
+
+  let lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigma, alpha);
+
+  log('step', `  MCMC: ${nIter} iterations (burn-in: ${burnin}, thin: ${thin})`);
+
+  for (let i = 0; i < nIter; i++) {
+    const prop = proposeDirichlet(wCurrent, conc);
+    const wProposed = prop.w;
+    const lpProposed = logPosterior(wProposed, targetVec, sourceMat, sigma, alpha);
+
+    const alphaFwd = wCurrent.map(v => Math.max(0.01, conc * v));
+    const alphaRev = wProposed.map(v => Math.max(0.01, conc * v));
+    const logQFwd = logDirichletDensity(wProposed, alphaFwd);
+    const logQRev = logDirichletDensity(wCurrent, alphaRev);
+
+    const logAlphaMH = (lpProposed - lpCurrent) + (logQRev - logQFwd);
+
+    if (Math.log(rand()) < logAlphaMH) {
+      wCurrent = wProposed;
+      lpCurrent = lpProposed;
+      acceptCount++;
+    }
+
+    logPostTrace[i] = lpCurrent;
+
+    if (i >= burnin && ((i - burnin) % thin === 0)) {
+      chain.push(wCurrent.slice());
+    }
+
+    // Adaptive proposal during burn-in
+    if (i < burnin && i > 0 && i % 500 === 0) {
+      const rate = acceptCount / (i + 1);
+      if (rate < 0.20) conc *= 0.8;
+      else if (rate > 0.50) conc *= 1.2;
+      conc = Math.max(50, Math.min(conc, 5000));
+    }
+
+    if (i % 5000 === 0) {
+      progressCb((i / nIter) * 100);
+      log('', `    Iter ${i}/${nIter} | Accept: ${(acceptCount/(i+1)).toFixed(3)} | Conc: ${conc.toFixed(0)}`);
+    }
+  }
+
+  progressCb(100);
+  const acceptRate = acceptCount / nIter;
+  log('ok', `  Final acceptance rate: ${acceptRate.toFixed(3)}`);
+
+  return { chain, logPostTrace: Array.from(logPostTrace), acceptanceRate: acceptRate, finalConcentration: conc };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POSTERIOR SUMMARY
+// ═══════════════════════════════════════════════════════════════════════════
+
+function summarisePosterior(chain, sourceNames, threshold = 0.005) {
+  const K = sourceNames.length;
+  const N = chain.length;
+  const results = [];
+
+  for (let k = 0; k < K; k++) {
+    const vals = chain.map(row => row[k]);
+    vals.sort((a,b) => a-b);
+    const mean = vals.reduce((a,b) => a+b, 0) / N;
+    const median = vals[Math.floor(N/2)];
+    const sd = Math.sqrt(vals.reduce((s,v) => s + (v-mean)*(v-mean), 0) / N);
+    const ciLo = vals[Math.floor(N * 0.025)];
+    const ciHi = vals[Math.floor(N * 0.975)];
+
+    results.push({
+      source: sourceNames[k],
+      mean, median, sd, ciLo, ciHi,
+      pctMean: mean * 100,
+      pctCILo: ciLo * 100,
+      pctCIHi: ciHi * 100,
+      significant: ciLo > threshold
+    });
+  }
+
+  results.sort((a,b) => b.mean - a.mean);
+  return results;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DIAGNOSTICS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function effectiveSampleSize(x) {
+  const n = x.length;
+  if (n < 10) return n;
+  const mean = x.reduce((a,b) => a+b, 0) / n;
+  const centered = x.map(v => v - mean);
+  const varX = centered.reduce((s,v) => s + v*v, 0) / n;
+  if (varX === 0) return n;
+
+  const maxLag = Math.min(n - 1, Math.floor(n / 2));
+  const acf = [];
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let s = 0;
+    for (let i = 0; i < n - lag; i++) s += centered[i] * centered[i + lag];
+    acf.push(s / (n * varX));
+  }
+
+  let tau = 1;
+  let k = 1;
+  while (k + 1 <= maxLag) {
+    const pairSum = acf[k] + acf[k + 1];
+    if (pairSum < 0) break;
+    tau += 2 * pairSum;
+    k += 2;
+  }
+
+  return Math.max(1, Math.floor(n / tau));
+}
+
+function gewekeZ(x) {
+  const n = x.length;
+  const n1 = Math.floor(n * 0.1);
+  const n2 = Math.floor(n * 0.5);
+  const x1 = x.slice(0, n1);
+  const x2 = x.slice(n - n2);
+  const m1 = x1.reduce((a,b) => a+b, 0) / n1;
+  const m2 = x2.reduce((a,b) => a+b, 0) / n2;
+  const v1 = x1.reduce((s,v) => s+(v-m1)*(v-m1), 0) / n1;
+  const v2 = x2.reduce((s,v) => s+(v-m2)*(v-m2), 0) / n2;
+  const ess1 = Math.max(1, effectiveSampleSize(x1));
+  const ess2 = Math.max(1, effectiveSampleSize(x2));
+  const denom = Math.sqrt(v1/ess1 + v2/ess2);
+  if (denom === 0) return 0;
+  return (m1 - m2) / denom;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGGING
+// ═══════════════════════════════════════════════════════════════════════════
+
+const logEl = document.getElementById('log-panel');
+
+function log(type, msg) {
+  logEl.classList.add('visible');
+  const cls = type === 'header' ? 'log-header' : type === 'step' ? 'log-step' :
+              type === 'ok' ? 'log-ok' : type === 'warn' ? 'log-warn' :
+              type === 'err' ? 'log-err' : '';
+  logEl.innerHTML += `<div class="${cls}">${escHtml(msg)}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHARTING (Canvas 2D)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CHART_COLORS = ['#5b8af5','#f87171','#4ade80','#fb923c','#a78bfa',
+  '#f472b6','#22d3ee','#fbbf24','#94a3b8','#e879f9',
+  '#34d399','#f97316','#818cf8','#fb7185','#a3e635'];
+
+function drawBarChart(canvas, summary, targetLabel) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  const items = summary.filter(s => s.pctMean > 0.3);
+  const n = items.length;
+  if (n === 0) return;
+
+  const padL = 10, padR = 20, padT = 10, padB = 30;
+  const barH = Math.min(35, (H - padT - padB) / n - 6);
+  const chartW = W - padL - padR;
+
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0, 0, W, H);
+
+  for (let i = 0; i < n; i++) {
+    const item = items[i];
+    const y = padT + i * (barH + 6);
+    const barW = (item.pctMean / 100) * chartW;
+    const col = CHART_COLORS[i % CHART_COLORS.length];
+
+    // CI bar (faded)
+    const ciL = (item.pctCILo / 100) * chartW;
+    const ciR = (item.pctCIHi / 100) * chartW;
+    ctx.fillStyle = col + '30';
+    ctx.fillRect(padL + ciL, y + barH * 0.3, ciR - ciL, barH * 0.4);
+
+    // Main bar
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    roundRect(ctx, padL, y, barW, barH, 4);
+    ctx.fill();
+
+    // Label
+    ctx.font = '600 12px "DM Sans"';
+    const label = `${item.source}  ${item.pctMean.toFixed(1)}%`;
+    const ciLabel = `[${item.pctCILo.toFixed(1)}% – ${item.pctCIHi.toFixed(1)}%]`;
+
+    if (item.pctMean > 25) {
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.fillText(label, padL + 8, y + barH/2 + 1);
+      ctx.font = '400 10px "JetBrains Mono"';
+      ctx.fillStyle = '#ffffff99';
+      ctx.fillText(ciLabel, padL + 8, y + barH/2 + 14);
+    } else {
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left';
+      ctx.fillText(label, padL + barW + 6, y + barH/2 + 1);
+      ctx.font = '400 10px "JetBrains Mono"';
+      ctx.fillStyle = '#6b7080';
+      ctx.fillText(ciLabel, padL + barW + 6, y + barH/2 + 14);
+    }
+  }
+
+  // X axis
+  ctx.strokeStyle = '#2a2f3a';
+  ctx.lineWidth = 1;
+  for (let p = 0; p <= 100; p += 20) {
+    const x = padL + (p / 100) * chartW;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + n * (barH + 6)); ctx.stroke();
+    ctx.fillStyle = '#6b7080';
+    ctx.font = '400 10px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.fillText(p + '%', x, H - 8);
+  }
+}
+
+function drawDensityPlot(canvas, chain, sourceIdx, sourceName, color) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0, 0, W, H);
+
+  const vals = chain.map(row => row[sourceIdx] * 100);
+  vals.sort((a,b) => a-b);
+
+  // KDE
+  const n = vals.length;
+  const mean = vals.reduce((a,b) => a+b,0) / n;
+  const sd = Math.sqrt(vals.reduce((s,v) => s+(v-mean)*(v-mean),0)/n);
+  const bw = 1.06 * sd * Math.pow(n, -0.2) * 1.2;
+  if (bw === 0 || isNaN(bw)) return;
+
+  const xMin = Math.max(0, vals[0] - 3*bw);
+  const xMax = Math.min(100, vals[n-1] + 3*bw);
+  const steps = 200;
+  const dx = (xMax - xMin) / steps;
+  const density = [];
+  let maxD = 0;
+
+  for (let i = 0; i <= steps; i++) {
+    const x = xMin + i * dx;
+    let d = 0;
+    for (let j = 0; j < n; j++) {
+      const z = (x - vals[j]) / bw;
+      d += Math.exp(-0.5 * z * z);
+    }
+    d /= (n * bw * Math.sqrt(2 * Math.PI));
+    density.push({x, d});
+    if (d > maxD) maxD = d;
+  }
+
+  const padL = 50, padR = 20, padT = 30, padB = 40;
+  const cW = W - padL - padR, cH = H - padT - padB;
+
+  const toX = x => padL + ((x - xMin) / (xMax - xMin)) * cW;
+  const toY = d => padT + cH - (d / maxD) * cH;
+
+  // Fill
+  ctx.beginPath();
+  ctx.moveTo(toX(density[0].x), toY(0));
+  for (const pt of density) ctx.lineTo(toX(pt.x), toY(pt.d));
+  ctx.lineTo(toX(density[density.length-1].x), toY(0));
+  ctx.closePath();
+  ctx.fillStyle = color + '35';
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  for (let i = 0; i < density.length; i++) {
+    const fn = i === 0 ? 'moveTo' : 'lineTo';
+    ctx[fn](toX(density[i].x), toY(density[i].d));
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Mean line
+  ctx.setLineDash([5,3]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(toX(mean), padT); ctx.lineTo(toX(mean), padT + cH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // CI lines
+  const ci025 = vals[Math.floor(n * 0.025)];
+  const ci975 = vals[Math.floor(n * 0.975)];
+  ctx.setLineDash([3,3]);
+  ctx.strokeStyle = '#6b7080';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(toX(ci025), padT); ctx.lineTo(toX(ci025), padT + cH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(toX(ci975), padT); ctx.lineTo(toX(ci975), padT + cH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels
+  ctx.fillStyle = color;
+  ctx.font = '600 12px "DM Sans"';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${sourceName}`, padL, 18);
+  ctx.font = '500 11px "JetBrains Mono"';
+  ctx.fillText(`Mean: ${mean.toFixed(1)}%`, toX(mean) + 6, padT + 16);
+
+  ctx.fillStyle = '#6b7080';
+  ctx.font = '400 10px "JetBrains Mono"';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${ci025.toFixed(1)}%`, toX(ci025), padT + cH + 16);
+  ctx.fillText(`${ci975.toFixed(1)}%`, toX(ci975), padT + cH + 16);
+
+  // Axes
+  ctx.strokeStyle = '#2a2f3a';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT + cH); ctx.lineTo(padL + cW, padT + cH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + cH); ctx.stroke();
+
+  // Y axis label
+  ctx.save();
+  ctx.fillStyle = '#6b7080';
+  ctx.font = '400 10px "JetBrains Mono"';
+  ctx.translate(14, padT + cH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.textAlign = 'center';
+  ctx.fillText('Density', 0, 0);
+  ctx.restore();
+}
+
+function drawTracePlot(canvas, chain, sourceIdx, sourceName, color) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0, 0, W, H);
+
+  const vals = chain.map(row => row[sourceIdx] * 100);
+  const n = vals.length;
+  const mean = vals.reduce((a,b) => a+b,0) / n;
+  let min = Infinity, max = -Infinity;
+  for (const v of vals) { if (v < min) min = v; if (v > max) max = v; }
+  const range = max - min || 1;
+
+  const padL = 50, padR = 20, padT = 25, padB = 30;
+  const cW = W - padL - padR, cH = H - padT - padB;
+
+  // Trace line
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = padL + (i / (n-1)) * cW;
+    const y = padT + cH - ((vals[i] - min) / range) * cH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = color + '60';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+
+  // Mean line
+  const meanY = padT + cH - ((mean - min) / range) * cH;
+  ctx.setLineDash([5,3]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, meanY); ctx.lineTo(padL + cW, meanY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Title
+  ctx.fillStyle = color;
+  ctx.font = '600 11px "DM Sans"';
+  ctx.textAlign = 'left';
+  ctx.fillText(sourceName, padL, 16);
+
+  // Axes
+  ctx.strokeStyle = '#2a2f3a';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT + cH); ctx.lineTo(padL + cW, padT + cH); ctx.stroke();
+
+  ctx.fillStyle = '#6b7080';
+  ctx.font = '400 9px "JetBrains Mono"';
+  ctx.textAlign = 'right';
+  ctx.fillText(max.toFixed(1) + '%', padL - 4, padT + 4);
+  ctx.fillText(min.toFixed(1) + '%', padL - 4, padT + cH + 4);
+}
+
+function drawLogPosteriorTrace(canvas, trace, burnin) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0, 0, W, H);
+
+  const n = trace.length;
+  // subsample for performance
+  const step = Math.max(1, Math.floor(n / 2000));
+  const sub = [];
+  for (let i = 0; i < n; i += step) sub.push({ i, v: trace[i] });
+
+  let min = Infinity, max = -Infinity;
+  for (const p of sub) {
+    if (isFinite(p.v)) {
+      if (p.v < min) min = p.v;
+      if (p.v > max) max = p.v;
+    }
+  }
+  const range = max - min || 1;
+
+  const padL = 60, padR = 20, padT = 25, padB = 30;
+  const cW = W - padL - padR, cH = H - padT - padB;
+
+  ctx.beginPath();
+  let started = false;
+  for (const p of sub) {
+    if (!isFinite(p.v)) continue;
+    const x = padL + (p.i / (n-1)) * cW;
+    const y = padT + cH - ((p.v - min) / range) * cH;
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#f8717160';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+
+  // Burn-in line
+  if (burnin > 0 && burnin < n) {
+    const bx = padL + (burnin / (n-1)) * cW;
+    ctx.setLineDash([5,3]);
+    ctx.strokeStyle = '#5b8af5';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(bx, padT); ctx.lineTo(bx, padT + cH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#5b8af5';
+    ctx.font = '400 10px "JetBrains Mono"';
+    ctx.textAlign = 'left';
+    ctx.fillText(`burn-in = ${burnin}`, bx + 4, padT + 14);
+  }
+
+  // Axes
+  ctx.strokeStyle = '#2a2f3a';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT + cH); ctx.lineTo(padL + cW, padT + cH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + cH); ctx.stroke();
+
+  ctx.fillStyle = '#6b7080';
+  ctx.font = '400 9px "JetBrains Mono"';
+  ctx.textAlign = 'right';
+  ctx.fillText(max.toFixed(1), padL - 4, padT + 4);
+  ctx.fillText(min.toFixed(1), padL - 4, padT + cH + 4);
+  ctx.textAlign = 'center';
+  ctx.fillText('Iteration', padL + cW/2, H - 4);
+
+  ctx.fillStyle = '#f87171';
+  ctx.font = '600 11px "DM Sans"';
+  ctx.textAlign = 'left';
+  ctx.fillText('Log-Posterior Trace', padL, 16);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN RUNNER
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runAnalysis() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+
+  logEl.innerHTML = '';
+  logEl.classList.add('visible');
+  document.getElementById('results-section').innerHTML = '';
+  document.getElementById('results-section').classList.remove('visible');
+
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressFill = document.getElementById('progress-fill');
+  progressWrap.style.display = '';
+
+  // Read params
+  const mode = document.getElementById('param-mode').value;
+  const nIter = parseInt(document.getElementById('param-iter').value) || 50000;
+  const burnin = parseInt(document.getElementById('param-burnin').value) || 10000;
+  const thin = parseInt(document.getElementById('param-thin').value) || 10;
+  const maxK = parseInt(document.getElementById('param-maxk').value) || 0;
+  const nKeep = parseInt(document.getElementById('param-nkeep').value) || 25;
+  const sigma = parseFloat(document.getElementById('param-sigma').value) || 0.01;
+  const alpha = parseFloat(document.getElementById('param-alpha').value) || 1.0;
+  const seed = parseInt(document.getElementById('param-seed').value) || 42;
+
+  rand = mulberry32(seed);
+
+  const sourceText = document.getElementById('source-text').value;
+  const targetText = document.getElementById('target-text').value;
+
+  if (!sourceText.trim() || !targetText.trim()) {
+    log('err', 'Error: Please provide both source and target data.');
+    btn.disabled = false;
+    btn.textContent = 'Run MCMC';
+    progressWrap.style.display = 'none';
+    return;
+  }
+
+  log('header', '════════════════════════════════════════════════════');
+  log('header', '  G25 Bayesian MCMC Admixture Estimator');
+  log('header', '════════════════════════════════════════════════════');
+
+  // Parse
+  const src = parseG25(sourceText);
+  const tgt = parseG25(targetText);
+
+  if (src.coords.length === 0) { log('err', 'Error: no valid source rows parsed.'); btn.disabled = false; btn.textContent = 'Run MCMC'; return; }
+  if (tgt.coords.length === 0) { log('err', 'Error: no valid target rows parsed.'); btn.disabled = false; btn.textContent = 'Run MCMC'; return; }
+
+  log('', `Loaded ${src.coords.length} source samples, ${new Set(src.populations).size} populations`);
+  log('', `Loaded ${tgt.coords.length} target(s)`);
+  log('', `Dimensions: ${src.coords[0].length}`);
+
+  // Aggregate if population mode
+  let sourceLabels, sourceCoords;
+  if (mode === 'population') {
+    log('', 'Mode: POPULATION (averaging within each population)');
+    const popNames = [...new Set(src.populations)];
+    sourceLabels = popNames;
+    sourceCoords = popNames.map(p => {
+      const idxs = src.populations.map((pp, i) => pp === p ? i : -1).filter(i => i >= 0);
+      const D = src.coords[0].length;
+      const avg = new Array(D).fill(0);
+      for (const i of idxs) for (let d = 0; d < D; d++) avg[d] += src.coords[i][d];
+      return avg.map(v => v / idxs.length);
+    });
+  } else {
+    log('', 'Mode: SAMPLE (each sample individually)');
+    sourceLabels = src.labels;
+    sourceCoords = src.coords;
+  }
+
+  log('', `Source matrix: ${sourceCoords.length} sources x ${sourceCoords[0].length} dimensions`);
+
+  // Yield to UI
+  await new Promise(r => setTimeout(r, 50));
+
+  const resultsSection = document.getElementById('results-section');
+  let resultsHTML = '<div class="results-header">Results</div>';
+
+  for (let tIdx = 0; tIdx < tgt.coords.length; tIdx++) {
+    const targetVec = tgt.coords[tIdx];
+    const targetLabel = tgt.labels[tIdx];
+
+    log('header', `\n──── Target: ${targetLabel} ────`);
+
+    // Step 1: Pre-selection
+    log('step', '\nStep 1: Pre-selecting candidate sources...');
+    await new Promise(r => setTimeout(r, 20));
+    const presel = preselectSources(targetVec, sourceCoords, sourceLabels, nKeep, log);
+    let selCoords = presel.indices.map(i => sourceCoords[i]);
+    let selNames = presel.indices.map(i => sourceLabels[i]);
+
+    // Step 2: Forward selection
+    log('step', '\nStep 2: Forward stepwise model selection...');
+    await new Promise(r => setTimeout(r, 20));
+    const effectiveMaxK = maxK > 0 ? maxK : Math.min(12, selCoords.length);
+    const effectiveMinK = maxK > 0 ? maxK : 2;
+    const fwd = forwardSelect(targetVec, selCoords, selNames, sigma, effectiveMaxK, effectiveMinK, log);
+    selCoords = fwd.indices.map(i => selCoords[i]);
+    selNames = fwd.indices.map(i => selNames[i]);
+
+    // Step 3: MCMC
+    log('step', '\nStep 3: Running Bayesian MCMC...');
+    await new Promise(r => setTimeout(r, 20));
+
+    const mcmcResult = await new Promise(resolve => {
+      setTimeout(() => {
+        const result = runMCMC(targetVec, selCoords, selNames, nIter, burnin, thin, sigma, alpha, log, pct => {
+          progressFill.style.width = pct + '%';
+        });
+        resolve(result);
+      }, 50);
+    });
+
+    // Step 4: Summarise
+    log('step', '\nStep 4: Summarising posteriors...');
+    const summary = summarisePosterior(mcmcResult.chain, selNames);
+
+    // Fit quality
+    const wMean = new Array(selNames.length).fill(0);
+    for (const row of mcmcResult.chain) for (let k = 0; k < row.length; k++) wMean[k] += row[k];
+    for (let k = 0; k < wMean.length; k++) wMean[k] /= mcmcResult.chain.length;
+    const pred = weightedSum(wMean, selCoords);
+    const resid = vecSub(targetVec, pred);
+    const rmse = Math.sqrt(dot(resid, resid) / targetVec.length);
+
+    // Print results to log
+    log('ok', '\n┌─────────────────────────────────────────────────┐');
+    log('ok', `│  RESULTS: ${targetLabel}`);
+    log('ok', '├─────────────────────────────────────────────────┤');
+    for (const s of summary) {
+      const sig = s.significant ? ' ***' : '';
+      log('', `│  ${s.source.padEnd(35)} ${s.pctMean.toFixed(1).padStart(5)}%  [${s.pctCILo.toFixed(1)}% - ${s.pctCIHi.toFixed(1)}%]${sig}`);
+    }
+    log('ok', '└─────────────────────────────────────────────────┘');
+    log('', `  *** = 95% CI excludes zero`);
+    log('', `  Fit RMSE: ${rmse.toFixed(6)}`);
+
+    // Diagnostics
+    const active = summary.filter(s => s.pctMean > 1);
+    const diagData = active.map(s => {
+      const idx = selNames.indexOf(s.source);
+      const vals = mcmcResult.chain.map(row => row[idx]);
+      return {
+        name: s.source,
+        ess: effectiveSampleSize(vals),
+        geweke: gewekeZ(vals)
+      };
+    });
+
+    // Build results HTML
+    const blockId = `result-${tIdx}`;
+    const canvasBarId = `bar-${tIdx}`;
+    const canvasLogPostId = `logpost-${tIdx}`;
+
+    resultsHTML += `<div class="result-block" id="${blockId}">`;
+    resultsHTML += `<h3>Target: ${escHtml(targetLabel)}</h3>`;
+
+    // Summary table
+    resultsHTML += `<div class="data-table-wrap"><table class="data-table">
+      <thead><tr><th>Source</th><th>Mean %</th><th>Median %</th><th>SD</th><th>95% CI Low</th><th>95% CI High</th><th>Signal</th></tr></thead><tbody>`;
+    for (const s of summary) {
+      const sigCls = s.significant ? 'sig-yes' : 'sig-no';
+      const sigTxt = s.significant ? '✓ sig' : 'n.s.';
+      resultsHTML += `<tr><td>${escHtml(s.source)}</td><td>${s.pctMean.toFixed(2)}%</td><td>${(s.median*100).toFixed(2)}%</td><td>${(s.sd*100).toFixed(3)}</td><td>${s.pctCILo.toFixed(2)}%</td><td>${s.pctCIHi.toFixed(2)}%</td><td class="${sigCls}">${sigTxt}</td></tr>`;
+    }
+    resultsHTML += `</tbody></table></div>`;
+
+    // Fit info
+    resultsHTML += `<div class="diag-grid">
+      <div class="diag-card"><div class="label">Fit RMSE</div><div class="value ${rmse < 0.01 ? 'good' : rmse < 0.02 ? 'warn' : 'bad'}">${rmse.toFixed(6)}</div></div>
+      <div class="diag-card"><div class="label">Accept Rate</div><div class="value ${mcmcResult.acceptanceRate >= 0.2 && mcmcResult.acceptanceRate <= 0.5 ? 'good' : 'warn'}">${mcmcResult.acceptanceRate.toFixed(3)}</div></div>
+      <div class="diag-card"><div class="label">Chain Length</div><div class="value">${mcmcResult.chain.length}</div></div>
+      <div class="diag-card"><div class="label">Sources Selected</div><div class="value">${selNames.length}</div></div>
+    </div>`;
+
+    // Bar chart
+    resultsHTML += `<div class="chart-container"><h4>Admixture Composition</h4><canvas id="${canvasBarId}" style="width:100%;height:${Math.max(200, summary.filter(s=>s.pctMean>0.3).length * 50)}px"></canvas></div>`;
+
+    // Density plots
+    const activeForPlots = summary.filter(s => s.pctMean > 0.5);
+    resultsHTML += `<div class="chart-row">`;
+    for (let i = 0; i < activeForPlots.length; i++) {
+      resultsHTML += `<div class="chart-container"><h4>Posterior Density</h4><canvas id="density-${tIdx}-${i}" style="width:100%;height:220px"></canvas></div>`;
+    }
+    resultsHTML += `</div>`;
+
+    // Trace plots
+    resultsHTML += `<div class="chart-row">`;
+    for (let i = 0; i < Math.min(activeForPlots.length, 8); i++) {
+      resultsHTML += `<div class="chart-container"><h4>Trace Plot</h4><canvas id="trace-${tIdx}-${i}" style="width:100%;height:160px"></canvas></div>`;
+    }
+    resultsHTML += `</div>`;
+
+    // Log-posterior trace
+    resultsHTML += `<div class="chart-container"><h4>Log-Posterior Trace</h4><canvas id="${canvasLogPostId}" style="width:100%;height:220px"></canvas></div>`;
+
+    // Diagnostics table
+    if (diagData.length > 0) {
+      resultsHTML += `<div class="chart-container"><h4>Convergence Diagnostics</h4><div class="data-table-wrap"><table class="data-table">
+        <thead><tr><th>Source</th><th>ESS</th><th>Geweke z</th><th>Status</th></tr></thead><tbody>`;
+      for (const d of diagData) {
+        const essClass = d.ess >= 200 ? 'good' : d.ess >= 100 ? 'warn' : 'bad';
+        const zOk = Math.abs(d.geweke) < 2;
+        resultsHTML += `<tr><td>${escHtml(d.name)}</td><td class="diag-card"><span class="value ${essClass}" style="font-size:0.85rem">${d.ess}</span></td><td>${d.geweke.toFixed(3)}</td><td class="${zOk ? 'sig-yes' : 'sig-no'}">${zOk ? 'OK' : '!! CHECK'}</td></tr>`;
+      }
+      resultsHTML += `</tbody></table></div></div>`;
+    }
+
+    resultsHTML += `</div>`;
+
+    // Render this block
+    resultsSection.innerHTML = resultsHTML;
+    resultsSection.classList.add('visible');
+
+    // Draw canvases after DOM update
+    await new Promise(r => setTimeout(r, 50));
+
+    drawBarChart(document.getElementById(canvasBarId), summary, targetLabel);
+    drawLogPosteriorTrace(document.getElementById(canvasLogPostId), mcmcResult.logPostTrace, burnin);
+
+    for (let i = 0; i < activeForPlots.length; i++) {
+      const idx = selNames.indexOf(activeForPlots[i].source);
+      const canvas = document.getElementById(`density-${tIdx}-${i}`);
+      if (canvas) drawDensityPlot(canvas, mcmcResult.chain, idx, activeForPlots[i].source, CHART_COLORS[i % CHART_COLORS.length]);
+    }
+
+    for (let i = 0; i < Math.min(activeForPlots.length, 8); i++) {
+      const idx = selNames.indexOf(activeForPlots[i].source);
+      const canvas = document.getElementById(`trace-${tIdx}-${i}`);
+      if (canvas) drawTracePlot(canvas, mcmcResult.chain, idx, activeForPlots[i].source, CHART_COLORS[i % CHART_COLORS.length]);
+    }
+  }
+
+  progressWrap.style.display = 'none';
+  btn.disabled = false;
+  btn.textContent = 'Run MCMC';
+  log('ok', '\n════════════════════════════════════════════════════');
+  log('ok', '  Analysis complete!');
+  log('ok', '════════════════════════════════════════════════════');
+}
+</script>
+
+</body>
+</html>
