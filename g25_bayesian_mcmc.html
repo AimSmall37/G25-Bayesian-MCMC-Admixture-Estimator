@@ -1521,7 +1521,8 @@ async function runAnalysis() {
   await new Promise(r => setTimeout(r, 50));
 
   const resultsSection = document.getElementById('results-section');
-  let resultsHTML = '<div class="results-header">Results</div>';
+  resultsSection.innerHTML = '<div class="results-header">Results</div>';
+  resultsSection.classList.add('visible');
 
   for (let tIdx = 0; tIdx < tgt.coords.length; tIdx++) {
     const targetVec = tgt.coords[tIdx];
@@ -1594,26 +1595,26 @@ async function runAnalysis() {
       };
     });
 
-    // Build results HTML
+    // Build this target's results HTML block
     const blockId = `result-${tIdx}`;
     const canvasBarId = `bar-${tIdx}`;
     const canvasLogPostId = `logpost-${tIdx}`;
 
-    resultsHTML += `<div class="result-block" id="${blockId}">`;
-    resultsHTML += `<h3>Target: ${escHtml(targetLabel)}</h3>`;
+    let blockHTML = `<div class="result-block" id="${blockId}">`;
+    blockHTML += `<h3>Target: ${escHtml(targetLabel)}</h3>`;
 
     // Summary table
-    resultsHTML += `<div class="data-table-wrap"><table class="data-table">
+    blockHTML += `<div class="data-table-wrap"><table class="data-table">
       <thead><tr><th>Source</th><th>Mean %</th><th>Median %</th><th>SD</th><th>95% CI Low</th><th>95% CI High</th><th>Signal</th></tr></thead><tbody>`;
     for (const s of summary) {
       const sigCls = s.significant ? 'sig-yes' : 'sig-no';
       const sigTxt = s.significant ? '✓ sig' : 'n.s.';
-      resultsHTML += `<tr><td>${escHtml(s.source)}</td><td>${s.pctMean.toFixed(2)}%</td><td>${(s.median*100).toFixed(2)}%</td><td>${(s.sd*100).toFixed(3)}</td><td>${s.pctCILo.toFixed(2)}%</td><td>${s.pctCIHi.toFixed(2)}%</td><td class="${sigCls}">${sigTxt}</td></tr>`;
+      blockHTML += `<tr><td>${escHtml(s.source)}</td><td>${s.pctMean.toFixed(2)}%</td><td>${(s.median*100).toFixed(2)}%</td><td>${(s.sd*100).toFixed(3)}</td><td>${s.pctCILo.toFixed(2)}%</td><td>${s.pctCIHi.toFixed(2)}%</td><td class="${sigCls}">${sigTxt}</td></tr>`;
     }
-    resultsHTML += `</tbody></table></div>`;
+    blockHTML += `</tbody></table></div>`;
 
     // Fit info
-    resultsHTML += `<div class="diag-grid">
+    blockHTML += `<div class="diag-grid">
       <div class="diag-card"><div class="label">Fit RMSE</div><div class="value ${rmse < 0.01 ? 'good' : rmse < 0.02 ? 'warn' : 'bad'}">${rmse.toFixed(6)}</div></div>
       <div class="diag-card"><div class="label">Accept Rate</div><div class="value ${mcmcResult.acceptanceRate >= 0.2 && mcmcResult.acceptanceRate <= 0.5 ? 'good' : 'warn'}">${mcmcResult.acceptanceRate.toFixed(3)}</div></div>
       <div class="diag-card"><div class="label">Chain Length</div><div class="value">${mcmcResult.chain.length}</div></div>
@@ -1621,43 +1622,42 @@ async function runAnalysis() {
     </div>`;
 
     // Bar chart
-    resultsHTML += `<div class="chart-container"><h4>Admixture Composition</h4><canvas id="${canvasBarId}" style="width:100%;height:${Math.max(200, summary.filter(s=>s.pctMean>0.3).length * 50)}px"></canvas></div>`;
+    blockHTML += `<div class="chart-container"><h4>Admixture Composition</h4><canvas id="${canvasBarId}" style="width:100%;height:${Math.max(200, summary.filter(s=>s.pctMean>0.3).length * 50)}px"></canvas></div>`;
 
     // Density plots
     const activeForPlots = summary.filter(s => s.pctMean > 0.5);
-    resultsHTML += `<div class="chart-row">`;
+    blockHTML += `<div class="chart-row">`;
     for (let i = 0; i < activeForPlots.length; i++) {
-      resultsHTML += `<div class="chart-container"><h4>Posterior Density</h4><canvas id="density-${tIdx}-${i}" style="width:100%;height:220px"></canvas></div>`;
+      blockHTML += `<div class="chart-container"><h4>Posterior Density</h4><canvas id="density-${tIdx}-${i}" style="width:100%;height:220px"></canvas></div>`;
     }
-    resultsHTML += `</div>`;
+    blockHTML += `</div>`;
 
     // Trace plots
-    resultsHTML += `<div class="chart-row">`;
+    blockHTML += `<div class="chart-row">`;
     for (let i = 0; i < Math.min(activeForPlots.length, 8); i++) {
-      resultsHTML += `<div class="chart-container"><h4>Trace Plot</h4><canvas id="trace-${tIdx}-${i}" style="width:100%;height:160px"></canvas></div>`;
+      blockHTML += `<div class="chart-container"><h4>Trace Plot</h4><canvas id="trace-${tIdx}-${i}" style="width:100%;height:160px"></canvas></div>`;
     }
-    resultsHTML += `</div>`;
+    blockHTML += `</div>`;
 
     // Log-posterior trace
-    resultsHTML += `<div class="chart-container"><h4>Log-Posterior Trace</h4><canvas id="${canvasLogPostId}" style="width:100%;height:220px"></canvas></div>`;
+    blockHTML += `<div class="chart-container"><h4>Log-Posterior Trace</h4><canvas id="${canvasLogPostId}" style="width:100%;height:220px"></canvas></div>`;
 
     // Diagnostics table
     if (diagData.length > 0) {
-      resultsHTML += `<div class="chart-container"><h4>Convergence Diagnostics</h4><div class="data-table-wrap"><table class="data-table">
+      blockHTML += `<div class="chart-container"><h4>Convergence Diagnostics</h4><div class="data-table-wrap"><table class="data-table">
         <thead><tr><th>Source</th><th>ESS</th><th>Geweke z</th><th>Status</th></tr></thead><tbody>`;
       for (const d of diagData) {
         const essClass = d.ess >= 200 ? 'good' : d.ess >= 100 ? 'warn' : 'bad';
         const zOk = Math.abs(d.geweke) < 2;
-        resultsHTML += `<tr><td>${escHtml(d.name)}</td><td class="diag-card"><span class="value ${essClass}" style="font-size:0.85rem">${d.ess}</span></td><td>${d.geweke.toFixed(3)}</td><td class="${zOk ? 'sig-yes' : 'sig-no'}">${zOk ? 'OK' : '!! CHECK'}</td></tr>`;
+        blockHTML += `<tr><td>${escHtml(d.name)}</td><td class="diag-card"><span class="value ${essClass}" style="font-size:0.85rem">${d.ess}</span></td><td>${d.geweke.toFixed(3)}</td><td class="${zOk ? 'sig-yes' : 'sig-no'}">${zOk ? 'OK' : '!! CHECK'}</td></tr>`;
       }
-      resultsHTML += `</tbody></table></div></div>`;
+      blockHTML += `</tbody></table></div></div>`;
     }
 
-    resultsHTML += `</div>`;
+    blockHTML += `</div>`;
 
-    // Render this block
-    resultsSection.innerHTML = resultsHTML;
-    resultsSection.classList.add('visible');
+    // Append this target's block to the DOM (preserving previous targets' drawn canvases)
+    resultsSection.insertAdjacentHTML('beforeend', blockHTML);
 
     // Draw canvases after DOM update
     await new Promise(r => setTimeout(r, 50));
