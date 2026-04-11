@@ -632,19 +632,45 @@ function randGamma(shape) {
 function parseG25(text) {
   const lines = text.trim().split('\n').filter(l => l.trim().length > 0);
   const labels = [], populations = [], samples = [], coords = [];
-  for (const line of lines) {
+  const debugWarnings = [];
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
     // handle both comma and tab delimiters
     const parts = line.indexOf('\t') >= 0 ? line.split('\t') : line.split(',');
     const label = parts[0].trim();
-    const vals = parts.slice(1).map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-    if (vals.length < 2) continue;
+    const rawVals = parts.slice(1).map(v => v.trim());
+    const vals = rawVals.map(v => parseFloat(v));
+    
+    // Debug: check for NaN values in parsed coordinates
+    const nanIndices = [];
+    for (let vi = 0; vi < vals.length; vi++) {
+      if (isNaN(vals[vi])) nanIndices.push(vi);
+    }
+    const validVals = vals.filter(v => !isNaN(v));
+    
+    if (nanIndices.length > 0 && validVals.length >= 2) {
+      debugWarnings.push(`  Line ${lineIdx+1} "${label}": ${nanIndices.length} NaN value(s) at column(s) ${nanIndices.map(i=>i+2).join(',')} — raw: [${nanIndices.map(i => '"'+rawVals[i]+'"').join(', ')}]`);
+    }
+    
+    if (validVals.length < 2) {
+      if (parts.length > 1) {
+        debugWarnings.push(`  Line ${lineIdx+1} "${label}": skipped — only ${validVals.length} valid numeric values (${parts.length-1} columns found)`);
+      }
+      continue;
+    }
+    
+    // Check for coordinate dimension consistency
+    if (coords.length > 0 && validVals.length !== coords[0].length) {
+      debugWarnings.push(`  Line ${lineIdx+1} "${label}": WARNING — ${validVals.length} dimensions vs ${coords[0].length} in first row`);
+    }
+    
     labels.push(label);
     const sp = label.split(':');
     populations.push(sp[0]);
     samples.push(sp.length > 1 ? sp.slice(1).join(':') : sp[0]);
-    coords.push(vals);
+    coords.push(validVals);
   }
-  return { labels, populations, samples, coords };
+  return { labels, populations, samples, coords, debugWarnings };
 }
 
 
@@ -1009,14 +1035,27 @@ function summarisePosterior(chain, sourceNames, threshold = 0.005) {
   const N = chain.length;
   const results = [];
 
+  if (N === 0) {
+    // Return NaN-safe defaults when chain is empty
+    for (let k = 0; k < K; k++) {
+      results.push({
+        source: sourceNames[k],
+        mean: 0, median: 0, sd: 0, ciLo: 0, ciHi: 0,
+        pctMean: 0, pctCILo: 0, pctCIHi: 0,
+        significant: false
+      });
+    }
+    return results;
+  }
+
   for (let k = 0; k < K; k++) {
     const vals = chain.map(row => row[k]);
     vals.sort((a,b) => a-b);
     const mean = vals.reduce((a,b) => a+b, 0) / N;
     const median = vals[Math.floor(N/2)];
     const sd = Math.sqrt(vals.reduce((s,v) => s + (v-mean)*(v-mean), 0) / N);
-    const ciLo = vals[Math.floor(N * 0.025)];
-    const ciHi = vals[Math.floor(N * 0.975)];
+    const ciLo = vals[Math.max(0, Math.floor(N * 0.025))];
+    const ciHi = vals[Math.min(N - 1, Math.floor(N * 0.975))];
 
     results.push({
       source: sourceNames[k],
@@ -1481,6 +1520,28 @@ async function runAnalysis() {
     return;
   }
 
+  // ── Validate parameters ──
+  if (burnin >= nIter) {
+    log('err', `Error: Burn-in (${burnin}) must be less than total iterations (${nIter}). No samples would be saved.`);
+    log('err', `  Tip: burn-in should typically be 10-20% of total iterations.`);
+    btn.disabled = false;
+    btn.textContent = 'Run MCMC';
+    progressWrap.style.display = 'none';
+    return;
+  }
+
+  const expectedSamples = Math.floor((nIter - burnin) / thin);
+  if (expectedSamples < 10) {
+    log('err', `Error: Only ${expectedSamples} posterior samples would be saved with current settings.`);
+    log('err', `  Reduce burn-in, increase iterations, or decrease thinning.`);
+    btn.disabled = false;
+    btn.textContent = 'Run MCMC';
+    progressWrap.style.display = 'none';
+    return;
+  }
+
+  log('', `  Expected posterior samples: ${expectedSamples}`);
+
   log('header', '════════════════════════════════════════════════════');
   log('header', '  G25 Bayesian MCMC Admixture Estimator');
   log('header', '════════════════════════════════════════════════════');
@@ -1491,6 +1552,34 @@ async function runAnalysis() {
 
   if (src.coords.length === 0) { log('err', 'Error: no valid source rows parsed.'); btn.disabled = false; btn.textContent = 'Run MCMC'; return; }
   if (tgt.coords.length === 0) { log('err', 'Error: no valid target rows parsed.'); btn.disabled = false; btn.textContent = 'Run MCMC'; return; }
+
+  // Debug: report any parsing warnings
+  if (src.debugWarnings && src.debugWarnings.length > 0) {
+    log('warn', `⚠ Source data parsing warnings (${src.debugWarnings.length}):`);
+    for (const w of src.debugWarnings) log('warn', w);
+  }
+  if (tgt.debugWarnings && tgt.debugWarnings.length > 0) {
+    log('warn', `⚠ Target data parsing warnings (${tgt.debugWarnings.length}):`);
+    for (const w of tgt.debugWarnings) log('warn', w);
+  }
+  
+  // Debug: check dimension consistency
+  const srcDims = new Set(src.coords.map(c => c.length));
+  const tgtDims = new Set(tgt.coords.map(c => c.length));
+  if (srcDims.size > 1) {
+    log('warn', `⚠ Source data has inconsistent dimensions: ${[...srcDims].join(', ')} — this may cause errors.`);
+  }
+  if (tgtDims.size > 1) {
+    log('warn', `⚠ Target data has inconsistent dimensions: ${[...tgtDims].join(', ')}`);
+  }
+  const srcDim = src.coords[0].length;
+  const tgtDim = tgt.coords[0].length;
+  if (srcDim !== tgtDim) {
+    log('err', `Error: Source dimensions (${srcDim}) ≠ Target dimensions (${tgtDim}). Data must have same number of G25 coordinates.`);
+    btn.disabled = false; btn.textContent = 'Run MCMC';
+    progressWrap.style.display = 'none';
+    return;
+  }
 
   log('', `Loaded ${src.coords.length} source samples, ${new Set(src.populations).size} populations`);
   log('', `Loaded ${tgt.coords.length} target(s)`);
@@ -1564,12 +1653,18 @@ async function runAnalysis() {
     const summary = summarisePosterior(mcmcResult.chain, selNames);
 
     // Fit quality
-    const wMean = new Array(selNames.length).fill(0);
-    for (const row of mcmcResult.chain) for (let k = 0; k < row.length; k++) wMean[k] += row[k];
-    for (let k = 0; k < wMean.length; k++) wMean[k] /= mcmcResult.chain.length;
-    const pred = weightedSum(wMean, selCoords);
-    const resid = vecSub(targetVec, pred);
-    const rmse = Math.sqrt(dot(resid, resid) / targetVec.length);
+    let rmse = NaN;
+    if (mcmcResult.chain.length > 0) {
+      const wMean = new Array(selNames.length).fill(0);
+      for (const row of mcmcResult.chain) for (let k = 0; k < row.length; k++) wMean[k] += row[k];
+      for (let k = 0; k < wMean.length; k++) wMean[k] /= mcmcResult.chain.length;
+      const pred = weightedSum(wMean, selCoords);
+      const resid = vecSub(targetVec, pred);
+      rmse = Math.sqrt(dot(resid, resid) / targetVec.length);
+    } else {
+      log('err', '  ⚠ Chain is empty — no posterior samples were saved!');
+      log('err', '    This happens when burn-in >= iterations. Reduce burn-in or increase iterations.');
+    }
 
     // Print results to log
     log('ok', '\n┌─────────────────────────────────────────────────┐');
@@ -1581,7 +1676,7 @@ async function runAnalysis() {
     }
     log('ok', '└─────────────────────────────────────────────────┘');
     log('', `  *** = 95% CI excludes zero`);
-    log('', `  Fit RMSE: ${rmse.toFixed(6)}`);
+    log('', `  Fit RMSE: ${isNaN(rmse) ? 'N/A (empty chain)' : rmse.toFixed(6)}`);
 
     // Diagnostics
     const active = summary.filter(s => s.pctMean > 1);
@@ -1609,15 +1704,19 @@ async function runAnalysis() {
     for (const s of summary) {
       const sigCls = s.significant ? 'sig-yes' : 'sig-no';
       const sigTxt = s.significant ? '✓ sig' : 'n.s.';
-      blockHTML += `<tr><td>${escHtml(s.source)}</td><td>${s.pctMean.toFixed(2)}%</td><td>${(s.median*100).toFixed(2)}%</td><td>${(s.sd*100).toFixed(3)}</td><td>${s.pctCILo.toFixed(2)}%</td><td>${s.pctCIHi.toFixed(2)}%</td><td class="${sigCls}">${sigTxt}</td></tr>`;
+      const fmt = (v) => isNaN(v) ? 'N/A' : v.toFixed(2) + '%';
+      const fmtSD = (v) => isNaN(v) ? 'N/A' : v.toFixed(3);
+      blockHTML += `<tr><td>${escHtml(s.source)}</td><td>${fmt(s.pctMean)}</td><td>${fmt(s.median*100)}</td><td>${fmtSD(s.sd*100)}</td><td>${fmt(s.pctCILo)}</td><td>${fmt(s.pctCIHi)}</td><td class="${sigCls}">${sigTxt}</td></tr>`;
     }
     blockHTML += `</tbody></table></div>`;
 
     // Fit info
+    const rmseDisplay = isNaN(rmse) ? 'N/A' : rmse.toFixed(6);
+    const rmseClass = isNaN(rmse) ? 'bad' : (rmse < 0.01 ? 'good' : rmse < 0.02 ? 'warn' : 'bad');
     blockHTML += `<div class="diag-grid">
-      <div class="diag-card"><div class="label">Fit RMSE</div><div class="value ${rmse < 0.01 ? 'good' : rmse < 0.02 ? 'warn' : 'bad'}">${rmse.toFixed(6)}</div></div>
+      <div class="diag-card"><div class="label">Fit RMSE</div><div class="value ${rmseClass}">${rmseDisplay}</div></div>
       <div class="diag-card"><div class="label">Accept Rate</div><div class="value ${mcmcResult.acceptanceRate >= 0.2 && mcmcResult.acceptanceRate <= 0.5 ? 'good' : 'warn'}">${mcmcResult.acceptanceRate.toFixed(3)}</div></div>
-      <div class="diag-card"><div class="label">Chain Length</div><div class="value">${mcmcResult.chain.length}</div></div>
+      <div class="diag-card"><div class="label">Chain Length</div><div class="value ${mcmcResult.chain.length === 0 ? 'bad' : ''}">${mcmcResult.chain.length}</div></div>
       <div class="diag-card"><div class="label">Sources Selected</div><div class="value">${selNames.length}</div></div>
     </div>`;
 
