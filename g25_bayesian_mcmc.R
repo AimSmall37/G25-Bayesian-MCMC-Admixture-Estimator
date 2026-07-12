@@ -106,6 +106,7 @@ parse_arguments <- function() {
     n_keep = 25L,
     sigma  = 0.01,
     alpha  = 1.0,
+    conc   = 30,
     seed   = 42L
   )
   
@@ -143,6 +144,7 @@ parse_arguments <- function() {
     cat("  --n_keep   Pre-selection candidates to keep           [default: 25]\n")
     cat("  --sigma    Noise std dev in likelihood                [default: 0.01]\n")
     cat("  --alpha    Dirichlet prior concentration              [default: 1.0]\n")
+    cat("  --conc     MCMC proposal concentration (step size)    [default: 30]\n")
     cat("  --seed     Random seed                                [default: 42]\n")
     stop("Both --source and --target are required.", call. = FALSE)
   }
@@ -193,10 +195,14 @@ log_posterior <- function(w, target_vec, source_mat, sigma, alpha) {
   lp + log_likelihood(w, target_vec, source_mat, sigma)
 }
 
-propose_dirichlet <- function(w_current, concentration = 500) {
+propose_dirichlet <- function(w_current, concentration = 30) {
   alpha_prop <- concentration * w_current
   alpha_prop[alpha_prop < 0.01] <- 0.01
   proposed <- rgamma(length(alpha_prop), shape = alpha_prop, rate = 1)
+  # With very small shapes, rgamma can underflow to exactly 0, which would make
+  # a component 0, send the Dirichlet density to -Inf, and force an automatic
+  # rejection. Keep every draw strictly positive so the move stays evaluable.
+  proposed <- pmax(proposed, 1e-300)
   proposed <- proposed / sum(proposed)
   list(w = proposed, alpha_used = alpha_prop)
 }
@@ -204,6 +210,40 @@ propose_dirichlet <- function(w_current, concentration = 500) {
 log_dirichlet_density <- function(x, alpha_vec) {
   if (any(x <= 0)) return(-Inf)
   sum((alpha_vec - 1) * log(x)) - sum(lgamma(alpha_vec)) + lgamma(sum(alpha_vec))
+}
+
+# ── Identifiability check ─────────────────────────────────────────────────────
+# When two selected sources sit almost on top of each other in G25 space, the
+# likelihood cannot tell them apart: any trade-off between them that preserves
+# their summed weight fits equally well, so the split between them is arbitrary.
+# Shifting a mass d between sources i and j changes the prediction by
+# d * (s_i - s_j), so the likelihood constrains that split with an approximate
+# posterior SD of sigma / ||s_i - s_j||. When that SD approaches the width of the
+# [0, 1] range (a uniform on [0, 1] has SD ~= 0.29), the split carries almost no
+# information. This warns for any such pair; it works for any K >= 2.
+check_near_duplicates <- function(coords, source_names, sigma, sd_threshold = 0.25) {
+  K <- nrow(coords)
+  if (is.null(K) || K < 2) return(invisible(FALSE))
+  flagged <- FALSE
+  for (i in 1:(K - 1)) {
+    for (j in (i + 1):K) {
+      d <- sqrt(sum((coords[i, ] - coords[j, ])^2))
+      split_sd <- if (d > 0) sigma / d else Inf
+      if (split_sd > sd_threshold) {
+        flagged <- TRUE
+        sd_txt <- if (split_sd > 1) ">1.0" else sprintf("%.2f", split_sd)
+        cat(sprintf(
+          paste0("    WARNING: near-identical sources '%s' and '%s'\n",
+                 "             differ by only %.2e in G25 space, comparable to the\n",
+                 "             noise level (sigma = %g). Their split is effectively\n",
+                 "             unidentifiable (implied posterior SD ~%s on a 0-1 scale):\n",
+                 "             the individual percentages are arbitrary, though their\n",
+                 "             combined contribution may still be well determined.\n"),
+          source_names[i], source_names[j], d, sigma, sd_txt))
+      }
+    }
+  }
+  invisible(flagged)
 }
 
 
@@ -390,7 +430,7 @@ forward_select <- function(target_vec, source_mat, source_names, sigma,
 
 run_mcmc <- function(target_vec, source_mat, source_names,
                      n_iter, burnin, thin, sigma, alpha,
-                     proposal_concentration = 500) {
+                     proposal_concentration = 30) {
   
   K <- nrow(source_mat)
   w_current <- rep(1/K, K)
@@ -400,10 +440,13 @@ run_mcmc <- function(target_vec, source_mat, source_names,
   colnames(chain) <- source_names
   log_post_trace  <- numeric(n_iter)
   accept_count    <- 0
+  accept_since_adapt <- 0          # accepts within the current adaptation window
+  adapt_window    <- 500L          # iterations per adaptation step
   save_idx        <- 0
   
   lp_current <- log_posterior(w_current, target_vec, source_mat, sigma, alpha)
-  conc <- proposal_concentration
+  conc <- if (!is.null(proposal_concentration) && proposal_concentration >= 2)
+            proposal_concentration else 30
   
   cat("    Running MCMC:", n_iter, "iterations (burn-in:", burnin,
       ", thin:", thin, ")\n")
@@ -414,8 +457,14 @@ run_mcmc <- function(target_vec, source_mat, source_names,
     
     lp_proposed <- log_posterior(w_proposed, target_vec, source_mat, sigma, alpha)
     
-    log_q_fwd <- log_dirichlet_density(w_proposed, conc * w_current)
-    log_q_rev <- log_dirichlet_density(w_current,  conc * w_proposed)
+    # Use the SAME floored shape vector the proposal actually drew from, so the
+    # forward/reverse densities in the acceptance ratio match the real proposal
+    # distribution (detailed balance). Using the unfloored conc * w here would
+    # bias the sampler whenever a component's shape hits the 0.01 floor.
+    alpha_fwd <- pmax(0.01, conc * w_current)
+    alpha_rev <- pmax(0.01, conc * w_proposed)
+    log_q_fwd <- log_dirichlet_density(w_proposed, alpha_fwd)
+    log_q_rev <- log_dirichlet_density(w_current,  alpha_rev)
     
     log_alpha_mh <- (lp_proposed - lp_current) + (log_q_rev - log_q_fwd)
     
@@ -423,6 +472,7 @@ run_mcmc <- function(target_vec, source_mat, source_names,
       w_current  <- w_proposed
       lp_current <- lp_proposed
       accept_count <- accept_count + 1
+      accept_since_adapt <- accept_since_adapt + 1
     }
     
     log_post_trace[i] <- lp_current
@@ -434,11 +484,19 @@ run_mcmc <- function(target_vec, source_mat, source_names,
       }
     }
     
-    if (i <= burnin && i %% 500 == 0) {
-      recent_rate <- accept_count / i
-      if (recent_rate < 0.20) conc <- conc * 0.8
-      else if (recent_rate > 0.50) conc <- conc * 1.2
-      conc <- max(50, min(conc, 5000))
+    # Adaptive proposal during burn-in.
+    # `conc` is the Dirichlet proposal concentration, so a HIGHER conc means
+    # proposals cluster tightly around the current point => a HIGHER acceptance
+    # rate. The adjustment therefore runs opposite to the acceptance rate: too
+    # many accepts => proposals too timid => LOOSEN (lower conc); too few =>
+    # TIGHTEN (raise conc). We use a windowed rate over the last adapt_window
+    # iterations so tuning reacts to recent behaviour, not a sticky average.
+    if (i <= burnin && i %% adapt_window == 0) {
+      window_rate <- accept_since_adapt / adapt_window
+      if (window_rate > 0.50) conc <- conc * 0.8        # loosen -> bigger steps
+      else if (window_rate < 0.20) conc <- conc * 1.2   # tighten -> smaller steps
+      conc <- max(2, min(conc, 5000))
+      accept_since_adapt <- 0
     }
     
     if (i %% 10000 == 0) {
@@ -1014,6 +1072,7 @@ make_plots <- function(chain, summary_df, log_post_trace, target_label,
               run_info$iter, run_info$burnin, run_info$thin),
       sprintf("  Sigma:         %.4f", run_info$sigma),
       sprintf("  Alpha:         %.2f", run_info$alpha),
+      sprintf("  Proposal conc: %.1f", run_info$conc),
       sprintf("  Seed:          %d", run_info$seed)
     )
     
@@ -1188,6 +1247,9 @@ for (t_idx in 1:nrow(tgt$coords)) {
     sel_names  <- sel_names[fwd$indices]
   }
   
+  # Identifiability check on the final source set
+  check_near_duplicates(sel_coords, sel_names, sigma = args$sigma)
+  
   # Run MCMC
   cat("\n  Step 3: Running Bayesian MCMC...\n")
   mcmc_result <- run_mcmc(
@@ -1198,7 +1260,8 @@ for (t_idx in 1:nrow(tgt$coords)) {
     burnin       = args$burnin,
     thin         = args$thin,
     sigma        = args$sigma,
-    alpha        = args$alpha
+    alpha        = args$alpha,
+    proposal_concentration = args$conc
   )
   
   # Summarise
@@ -1259,6 +1322,7 @@ for (t_idx in 1:nrow(tgt$coords)) {
     thin         = args$thin,
     sigma        = args$sigma,
     alpha        = args$alpha,
+    conc         = args$conc,
     seed         = args$seed,
     max_k        = args$max_k,
     target_label = target_label,

@@ -145,12 +145,13 @@ The R script outputs a multi-page PDF with publication-style plots.
 
 ### Installation
 
-No installation required beyond base R. The script has **zero external package dependencies** — it runs on any system with R installed, including older R versions (tested on R 4.3).
+You need R plus three packages that the script uses for its PDF plots: `ggplot2`, `patchwork`, and `reshape2`. The script tries to install any that are missing the first time it runs, so on a machine with internet access you usually do not have to do anything. To install them yourself ahead of time:
 
-```bash
-# That's it. Just make sure R is available:
-which Rscript
+```r
+install.packages(c("ggplot2", "patchwork", "reshape2"))
 ```
+
+The statistical engine (pre-selection, model selection, and MCMC) uses only base R. The three packages are needed only for the plotting step at the end, so if you strip out the plotting you can run the analysis on base R alone.
 
 ### Usage
 
@@ -194,6 +195,7 @@ Options:
   --n_keep   Pre-selection candidates to keep              [default: 25]
   --sigma    Noise std dev in likelihood                   [default: 0.01]
   --alpha    Dirichlet prior concentration                 [default: 1.0]
+  --conc     MCMC proposal concentration (step size)       [default: 30]
   --seed     Random seed                                   [default: 42]
 ```
 
@@ -257,6 +259,43 @@ All parameters from the R script are exposed as form controls in the web interfa
 
 ---
 
+## Recent Fixes: Sampler Correctness
+
+An earlier release of both the R script and the web app had a bug in the part of the MCMC sampler that tunes its own step size. The effect was consistent and one-directional: the credible intervals came out too narrow, so every component looked more certain than the data actually supports. This release corrects it. If you ran an older version, it is worth re-running your analyses, because the point estimates will move only a little but the interval widths will change noticeably.
+
+Here is what changed, and what each change means in practice.
+
+### The step-size tuning ran in the wrong direction
+
+On each step the sampler proposes a new set of proportions and then either accepts or rejects it. The acceptance rate is the fraction it accepts, and it tells you whether the steps are sized well. A very high rate means the steps are tiny and the chain is barely moving. A very low rate means the steps overshoot and almost nothing gets accepted. The healthy range is roughly 20 to 50 percent.
+
+The old code adjusted the step size the wrong way, so instead of settling into that range the acceptance rate drifted up toward 100 percent and stayed there. A chain that accepts nearly everything has effectively stopped moving. It still reports narrow intervals, but they are narrow only because the chain never visited the alternatives, so they understate the real uncertainty. The tuning now moves in the correct direction, and it responds to the acceptance rate over the most recent block of iterations instead of a running average from the start of the run, so it finds a good step size quickly.
+
+### The starting step size was too small, and is now adjustable
+
+The proposal began very tight, which is what let the acceptance rate run away in the first place. It now starts at a more reasonable value. It is also exposed as a parameter you can set: `--conc` in the R script and the "Proposal conc." field in the web app. Most runs will never need to touch it, but it is there if a particular dataset wants larger or smaller steps.
+
+### The acceptance test used a slightly wrong proposal density (R script)
+
+The formula that decides whether to accept a step, the Metropolis-Hastings ratio, has to be computed from the exact proposal distribution the sampler drew from. In the R script it was computed from a slightly different one whenever a component's weight pressed against a small internal floor. That broke the balance condition MCMC relies on to sample the right distribution, and it biased results when a component was near zero. The R script now uses the exact proposal in the ratio. The web app already handled this correctly, so this particular fix applies only to the R version.
+
+### Near-identical sources now produce a warning
+
+If two of the selected source populations sit almost on top of each other in G25 space, no method can decide how to divide ancestry between them. Any split that keeps their sum fixed fits the target equally well, so the individual percentages are arbitrary even though their combined share may be well determined. The tool now checks the final source set and prints a warning that names the offending pair. It measures the distance between the two sources against the noise level (`sigma`); when that distance is small enough that the split could sit almost anywhere between 0 and 100 percent, it flags the pair. When you see this warning, read the two flagged percentages as one combined number rather than two separate signals.
+
+### A numerical edge case in the proposal
+
+When a component's weight became very small, the underlying random draw could round down to exactly zero, which forced that step to be thrown out. The draw is now kept just above zero. This mostly matters if you run with a sparse prior (`--alpha` below 1), where small weights are common.
+
+### How to tell a run is healthy
+
+After any run, check two numbers:
+
+- **Acceptance rate**: you want it roughly between 0.2 and 0.5. The web app shows this in green when it is in range. If it is close to 1.0, the run is not to be trusted.
+- **Effective sample size (ESS)**: you want at least about 200 per active component. If it is lower, raise the iteration count and run again.
+
+When both look right, the credible intervals are dependable. If the intervals are wider than an older version gave you, that is expected and correct. The old ones were understating the uncertainty, which is the exact mistake this whole tool exists to avoid.
+
 ## Tuning Guide
 
 These recommendations apply to both versions.
@@ -291,6 +330,16 @@ How many candidate sources survive the pre-selection filter before forward stepw
 - `50,000` (default): Usually sufficient for well-separated sources with K ≤ 8.
 - `100,000–200,000`: Recommended if diagnostics show low ESS or failed Geweke tests.
 - Check the diagnostics — if ESS < 200 for any active component, increase iterations.
+
+### Proposal Concentration (`--conc`) — MCMC Step Size
+
+This sets how big a step the sampler tries on each iteration. It is a tuning knob for the sampler, not a modeling choice, so it changes how efficiently the chain explores but not the model itself. Higher values mean smaller, more cautious steps; lower values mean larger, bolder steps.
+
+- `30` (default): A good starting point. The sampler adjusts it automatically during burn-in, so for most runs you can leave it alone.
+- Raise it (for example `100`) if the acceptance rate is coming out too low (well under 0.2), which means the steps are overshooting.
+- Lower it (for example `10`) if the acceptance rate is coming out too high (well over 0.5), which means the steps are too timid.
+
+Because the automatic tuning already pushes the acceptance rate toward the healthy 0.2 to 0.5 range, changing this by hand is rarely necessary. It is most useful for very high-dimensional runs or difficult targets where the automatic tuning needs a better starting point.
 
 ## Limitations and Caveats
 
