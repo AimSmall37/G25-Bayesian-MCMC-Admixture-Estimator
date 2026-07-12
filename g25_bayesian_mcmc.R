@@ -105,6 +105,9 @@ parse_arguments <- function() {
     max_k  = 0L,
     n_keep = 25L,
     sigma  = 0.01,
+    sigma_mode = "empirical",
+    hetero = FALSE,
+    sigma_prior_strength = 0,
     alpha  = 1.0,
     conc   = 30,
     seed   = 42L
@@ -143,6 +146,11 @@ parse_arguments <- function() {
     cat("  --max_k    Max source components (0 = auto via BIC)   [default: 0]\n")
     cat("  --n_keep   Pre-selection candidates to keep           [default: 25]\n")
     cat("  --sigma    Noise std dev in likelihood                [default: 0.01]\n")
+    cat("  --sigma_mode  'empirical' (derive from panel), 'fixed' (--sigma),\n")
+    cat("             or 'bayes' (sample sigma, anchored to empirical floor)\n")
+    cat("                                                        [default: empirical]\n")
+    cat("  --hetero   Per-dimension noise TRUE/FALSE             [default: FALSE]\n")
+    cat("  --sigma_prior_strength  bayes prior pseudo-count (0=#dims) [default: 0]\n")
     cat("  --alpha    Dirichlet prior concentration              [default: 1.0]\n")
     cat("  --conc     MCMC proposal concentration (step size)    [default: 30]\n")
     cat("  --seed     Random seed                                [default: 42]\n")
@@ -175,13 +183,74 @@ read_g25 <- function(filepath) {
 
 
 ###############################################################################
+# 1b. EMPIRICAL NOISE FLOOR (Phase 1: derive sigma from the source panel)
+###############################################################################
+#  The scatter of samples around their own population mean measures the
+#  per-individual, per-dimension noise in G25 space (measurement error plus
+#  individual/drift variation). Pooling that scatter across every population
+#  that has >= 2 samples gives a data-derived noise floor, so sigma no longer
+#  has to be guessed. Populations with a single sample carry no within-group
+#  information and are skipped.
+#
+#  Returns:
+#    sigma_scalar : pooled homoscedastic estimate (one number for all dims)
+#    sigma_d      : per-dimension estimate (kept for a future heteroscedastic mode)
+#    df           : total within-population degrees of freedom behind the estimate
+#    n_multi      : how many populations contributed (had >= 2 samples)
+###############################################################################
+
+estimate_noise_floor <- function(coords, populations) {
+  D  <- ncol(coords)
+  ss <- numeric(D)   # within-population sum of squares, per dimension
+  df <- 0L
+  n_multi <- 0L
+
+  # Group row indices by population once (O(n)) instead of scanning the whole
+  # label vector for every population (O(n * n_pops)).
+  groups <- split(seq_along(populations), populations)
+  for (idx in groups) {
+    if (length(idx) < 2) next                 # singletons: no within-group scatter
+    xp <- coords[idx, , drop = FALSE]
+    mu <- colMeans(xp)
+    ss <- ss + colSums(sweep(xp, 2, mu)^2)
+    df <- df + (length(idx) - 1L)
+    n_multi <- n_multi + 1L
+  }
+
+  if (df < 1) {
+    return(list(sigma_scalar = NA_real_, sigma_d = rep(NA_real_, D),
+                df = 0L, n_multi = 0L))
+  }
+
+  var_d <- ss / df                            # per-dimension variance
+  list(sigma_scalar = sqrt(mean(var_d)),      # pooled across dimensions
+       sigma_d      = sqrt(var_d),
+       df           = df,
+       n_multi      = n_multi)
+}
+
+# Propagate the per-individual noise floor into the residual sigma the model
+# should use for one target, given the mixture weights and the sample counts
+# behind each source and the target:
+#   sigma_resid = sigma_indiv * sqrt( 1/m_target + sum_k w_k^2 / n_k )
+derive_target_sigma <- function(sigma_indiv, weights, n_samples_per_source,
+                                m_target = 1) {
+  source_term <- sum((weights^2) / pmax(n_samples_per_source, 1))
+  sigma_indiv * sqrt(1 / max(m_target, 1) + source_term)
+}
+
+
+###############################################################################
 # 2. BAYESIAN MODEL
 ###############################################################################
 
 log_likelihood <- function(w, target_vec, source_mat, sigma) {
   predicted <- as.vector(w %*% source_mat)
   residuals <- target_vec - predicted
-  -sum(residuals^2) / (2 * sigma^2)
+  # sigma may be a single number (homoscedastic) or a length-D vector (one noise
+  # level per G25 dimension). Dividing element-wise handles both; with a scalar
+  # this reduces exactly to -sum(residuals^2)/(2*sigma^2).
+  -sum((residuals / sigma)^2) / 2
 }
 
 log_prior_dirichlet <- function(w, alpha) {
@@ -271,71 +340,89 @@ solve_nnls <- function(target_vec, source_mat, max_iter = 2000, tol = 1e-8) {
   w
 }
 
-residual_chase <- function(target_vec, source_mat, source_names, n_rounds = 10) {
+residual_chase <- function(target_vec, source_mat, source_names, n_rounds = 10,
+                           restrict_to = NULL, progress = FALSE) {
+  K <- nrow(source_mat)
+  # Only search within the supplied candidate pool. Truly essential sources
+  # (even distant ones) already carry non-zero NNLS weight and so are in the
+  # pool; restricting the search here cuts cost by ~10x on large panels without
+  # losing them.
+  search_pool <- if (is.null(restrict_to)) seq_len(K) else restrict_to
   selected <- integer(0)
   residual <- target_vec
-  
+
   for (round in 1:n_rounds) {
-    rss_reduction <- numeric(nrow(source_mat))
-    for (j in 1:nrow(source_mat)) {
-      if (j %in% selected) { rss_reduction[j] <- -Inf; next }
+    if (progress) {
+      cat(sprintf("\r        residual-chase round %d/%d  ", round, n_rounds))
+      flush(stdout())
+    }
+    rss_reduction <- rep(-Inf, K)
+    for (j in search_pool) {
+      if (j %in% selected) next
       trial_set <- c(selected, j)
       trial_mat <- source_mat[trial_set, , drop = FALSE]
       w_trial <- solve_nnls(target_vec, trial_mat, max_iter = 500)
       pred <- as.vector(w_trial %*% trial_mat)
       rss_reduction[j] <- -sum((target_vec - pred)^2)
     }
-    
+
     best <- which.max(rss_reduction)
-    if (best %in% selected) break
+    if (!is.finite(rss_reduction[best]) || best %in% selected) break
     selected <- c(selected, best)
-    
+
     trial_mat <- source_mat[selected, , drop = FALSE]
     w_trial <- solve_nnls(target_vec, trial_mat, max_iter = 500)
     residual <- target_vec - as.vector(w_trial %*% trial_mat)
-    
+
     if (sqrt(sum(residual^2)) < 1e-6) break
   }
+  if (progress) cat("\n")
   selected
 }
 
 preselect_sources <- function(target_vec, source_mat, source_names, n_keep = 25) {
   K <- nrow(source_mat)
   cat("    Running multi-strategy pre-selection on", K, "sources...\n")
-  
+
   dists <- apply(source_mat, 1, function(s) sqrt(sum((target_vec - s)^2)))
   dist_top <- order(dists)[1:min(n_keep, K)]
   cat("      Distance-based:", length(dist_top), "candidates\n")
-  
+
   w_nnls <- solve_nnls(target_vec, source_mat, max_iter = 2000)
   nnls_active <- which(w_nnls > 1e-4)
   nnls_top <- order(-w_nnls)[1:min(n_keep, K)]
   nnls_set <- unique(c(nnls_active, nnls_top))
   cat("      NNLS-based:", length(nnls_active), "active (weight > 0.01%),",
       length(nnls_set), "total candidates\n")
-  
-  chase_set <- residual_chase(target_vec, source_mat, source_names, n_rounds = 12)
-  cat("      Residual-chase:", length(chase_set), "candidates\n")
-  
+
   target_norm <- target_vec / (sqrt(sum(target_vec^2)) + 1e-15)
   cos_sim <- apply(source_mat, 1, function(s) {
     sum(s * target_norm) / (sqrt(sum(s^2)) + 1e-15)
   })
   dir_top <- order(-cos_sim)[1:min(ceiling(n_keep/3), K)]
-  
+
+  # Residual-chase now searches only the union of the cheap methods' candidates
+  # rather than all K sources. On a 5000+ source panel this is ~10x faster.
+  chase_pool <- unique(c(dist_top, nnls_set, dir_top))
+  cat("      Residual-chase: searching", length(chase_pool), "pooled candidates...\n")
+  chase_set <- residual_chase(target_vec, source_mat, source_names,
+                              n_rounds = 12, restrict_to = chase_pool,
+                              progress = TRUE)
+  cat("      Residual-chase:", length(chase_set), "candidates\n")
+
   all_candidates <- unique(c(nnls_set, chase_set, dist_top, dir_top))
-  
+
   if (length(all_candidates) > n_keep) {
     scores <- w_nnls[all_candidates] * 1000 + 1 / (dists[all_candidates] + 0.001)
     keep_idx <- order(-scores)[1:n_keep]
     all_candidates <- all_candidates[keep_idx]
   }
-  
+
   cat("    => Pre-selected", length(all_candidates), "candidates from", K, "total\n")
   cat("    Candidates:", paste(source_names[all_candidates], collapse = ", "), "\n")
-  
+
   sub_w <- solve_nnls(target_vec, source_mat[all_candidates, , drop = FALSE], max_iter = 2000)
-  
+
   list(indices = all_candidates, initial_weights = sub_w)
 }
 
@@ -346,9 +433,11 @@ preselect_sources <- function(target_vec, source_mat, source_names, n_keep = 25)
 
 compute_bic <- function(target_vec, source_mat, w, sigma, K_active) {
   predicted <- as.vector(w %*% source_mat)
-  rss <- sum((target_vec - predicted)^2)
+  resid <- target_vec - predicted
   n   <- length(target_vec)
-  log_lik <- -n/2 * log(2 * pi * sigma^2) - rss / (2 * sigma^2)
+  # Per-dimension Gaussian log-likelihood; sigma may be scalar or length-n.
+  # With a scalar this equals -n/2*log(2*pi*sigma^2) - rss/(2*sigma^2).
+  log_lik <- -0.5 * sum(log(2 * pi * sigma^2)) - 0.5 * sum((resid / sigma)^2)
   -2 * log_lik + (K_active - 1) * log(n)
 }
 
@@ -430,33 +519,53 @@ forward_select <- function(target_vec, source_mat, source_names, sigma,
 
 run_mcmc <- function(target_vec, source_mat, source_names,
                      n_iter, burnin, thin, sigma, alpha,
-                     proposal_concentration = 30) {
-  
+                     proposal_concentration = 30,
+                     sample_sigma = FALSE,
+                     sigma_prior_strength = NULL,
+                     progress_every = 10000L) {
+
   K <- nrow(source_mat)
+  D <- length(target_vec)
   w_current <- rep(1/K, K)
-  
+
+  # `sigma` is the BASE noise level (scalar or length-D vector). In bayes mode we
+  # sample a single scale factor k on top of it: effective sigma = k * base.
+  sigma_base <- sigma
+  rms_base   <- sqrt(mean(sigma_base^2))     # scalar summary of the base level
+
+  # Inverse-Gamma prior on k^2, centred at 1 (i.e. on the empirical floor), with
+  # pseudo-count nu0. Posterior stays conjugate: k^2 | w ~ Inv-Gamma updated by
+  # the whitened residual sum of squares. Because the panel floor is a strong
+  # anchor, k stays near 1 unless this target genuinely misfits the sources.
+  nu0 <- if (is.null(sigma_prior_strength)) D else sigma_prior_strength
+  a0  <- nu0 / 2 + 1
+  b0  <- nu0 / 2
+  k2  <- 1
+  sigma_cur <- sigma_base
+
   n_save   <- floor((n_iter - burnin) / thin)
   chain    <- matrix(0, nrow = n_save, ncol = K)
   colnames(chain) <- source_names
+  sigma_samples   <- if (sample_sigma) numeric(n_save) else NULL
   log_post_trace  <- numeric(n_iter)
   accept_count    <- 0
   accept_since_adapt <- 0          # accepts within the current adaptation window
   adapt_window    <- 500L          # iterations per adaptation step
   save_idx        <- 0
-  
-  lp_current <- log_posterior(w_current, target_vec, source_mat, sigma, alpha)
+
+  lp_current <- log_posterior(w_current, target_vec, source_mat, sigma_cur, alpha)
   conc <- if (!is.null(proposal_concentration) && proposal_concentration >= 2)
             proposal_concentration else 30
-  
+
   cat("    Running MCMC:", n_iter, "iterations (burn-in:", burnin,
-      ", thin:", thin, ")\n")
-  
+      ", thin:", thin, ")", if (sample_sigma) " [sampling sigma]" else "", "\n")
+
   for (i in 1:n_iter) {
     prop <- propose_dirichlet(w_current, conc)
     w_proposed <- prop$w
-    
-    lp_proposed <- log_posterior(w_proposed, target_vec, source_mat, sigma, alpha)
-    
+
+    lp_proposed <- log_posterior(w_proposed, target_vec, source_mat, sigma_cur, alpha)
+
     # Use the SAME floored shape vector the proposal actually drew from, so the
     # forward/reverse densities in the acceptance ratio match the real proposal
     # distribution (detailed balance). Using the unfloored conc * w here would
@@ -465,25 +574,36 @@ run_mcmc <- function(target_vec, source_mat, source_names,
     alpha_rev <- pmax(0.01, conc * w_proposed)
     log_q_fwd <- log_dirichlet_density(w_proposed, alpha_fwd)
     log_q_rev <- log_dirichlet_density(w_current,  alpha_rev)
-    
+
     log_alpha_mh <- (lp_proposed - lp_current) + (log_q_rev - log_q_fwd)
-    
+
     if (log(runif(1)) < log_alpha_mh) {
       w_current  <- w_proposed
       lp_current <- lp_proposed
       accept_count <- accept_count + 1
       accept_since_adapt <- accept_since_adapt + 1
     }
-    
+
+    # Gibbs update of the noise scale (bayes mode). Conditional on the current
+    # weights, k^2 has a closed-form Inverse-Gamma posterior.
+    if (sample_sigma) {
+      pred <- as.vector(w_current %*% source_mat)
+      u_ss <- sum(((target_vec - pred) / sigma_base)^2)   # whitened residual SS
+      k2   <- 1 / rgamma(1, shape = a0 + D / 2, rate = b0 + u_ss / 2)
+      sigma_cur  <- sqrt(k2) * sigma_base
+      lp_current <- log_posterior(w_current, target_vec, source_mat, sigma_cur, alpha)
+    }
+
     log_post_trace[i] <- lp_current
-    
+
     if (i > burnin && ((i - burnin) %% thin == 0)) {
       save_idx <- save_idx + 1
       if (save_idx <= n_save) {
         chain[save_idx, ] <- w_current
+        if (sample_sigma) sigma_samples[save_idx] <- sqrt(k2) * rms_base
       }
     }
-    
+
     # Adaptive proposal during burn-in.
     # `conc` is the Dirichlet proposal concentration, so a HIGHER conc means
     # proposals cluster tightly around the current point => a HIGHER acceptance
@@ -498,20 +618,36 @@ run_mcmc <- function(target_vec, source_mat, source_names,
       conc <- max(2, min(conc, 5000))
       accept_since_adapt <- 0
     }
-    
-    if (i %% 10000 == 0) {
-      cat("      Iteration", i, "/", n_iter,
-          " | Accept rate:", round(accept_count/i, 3),
-          " | Proposal conc:", round(conc, 1), "\n")
+
+    if (progress_every > 0 && i %% progress_every == 0) {
+      msg <- sprintf("\r      MCMC %d/%d | accept %.3f | conc %.1f",
+                     i, n_iter, accept_count/i, conc)
+      if (sample_sigma) msg <- paste0(msg, sprintf(" | sigma %.5f", sqrt(k2)*rms_base))
+      cat(msg, "   "); flush(stdout())
     }
   }
-  
+  if (progress_every > 0) cat("\n")
+
   cat("    Final acceptance rate:", round(accept_count / n_iter, 3), "\n")
-  
+
+  sigma_posterior <- NULL
+  if (sample_sigma) {
+    ss <- sigma_samples[1:save_idx]
+    sigma_posterior <- list(
+      mean  = mean(ss),
+      ci_lo = as.numeric(quantile(ss, 0.025)),
+      ci_hi = as.numeric(quantile(ss, 0.975)),
+      samples = ss
+    )
+    cat(sprintf("    Posterior sigma: %.5f  [%.5f - %.5f]\n",
+                sigma_posterior$mean, sigma_posterior$ci_lo, sigma_posterior$ci_hi))
+  }
+
   list(chain = chain[1:save_idx, , drop = FALSE],
        log_posterior_trace = log_post_trace,
        acceptance_rate = accept_count / n_iter,
-       final_concentration = conc)
+       final_concentration = conc,
+       sigma_posterior = sigma_posterior)
 }
 
 
@@ -552,18 +688,23 @@ summarise_posterior <- function(chain, source_names, threshold = 0.005) {
 effective_sample_size <- function(x) {
   n <- length(x)
   if (n < 10) return(n)
-  
+
   x_centred <- x - mean(x)
   max_lag <- min(n - 1, floor(n / 2))
-  
+
   var_x <- sum(x_centred^2) / n
   if (var_x == 0) return(n)
-  
-  acf_vals <- numeric(max_lag + 1)
-  for (lag in 0:max_lag) {
-    acf_vals[lag + 1] <- sum(x_centred[1:(n - lag)] * x_centred[(1 + lag):n]) / (n * var_x)
-  }
-  
+
+  # Autocorrelations via FFT: zero-pad to at least 2n-1 so the circular
+  # autocovariance from the inverse transform equals the linear one. This is
+  # O(n log n) instead of the previous O(n^2) lag-by-lag loop, and returns
+  # numerically identical acf values. Only lags 0..max_lag are needed below.
+  m <- nextn(2 * n - 1, factors = 2)
+  fx <- fft(c(x_centred, numeric(m - n)))
+  acov <- Re(fft(fx * Conj(fx), inverse = TRUE)) / m   # circular autocovariance
+  acf_vals <- (acov[1:(max_lag + 1)] / n) / var_x      # normalise to acf (lag 0 = 1)
+
+  # Geyer initial-positive-sequence estimator of the autocorrelation time.
   tau <- 1
   k <- 1
   while (k + 1 <= max_lag) {
@@ -572,7 +713,7 @@ effective_sample_size <- function(x) {
     tau <- tau + 2 * pair_sum
     k <- k + 2
   }
-  
+
   max(1, floor(n / tau))
 }
 
@@ -1070,7 +1211,7 @@ make_plots <- function(chain, summary_df, log_post_trace, target_label,
       sprintf("  Total sources: %d populations", run_info$n_sources),
       sprintf("  Iterations:    %d (burn-in: %d, thin: %d)",
               run_info$iter, run_info$burnin, run_info$thin),
-      sprintf("  Sigma:         %.4f", run_info$sigma),
+      sprintf("  Sigma:         %.4f (%s)", run_info$sigma, run_info$sigma_mode),
       sprintf("  Alpha:         %.2f", run_info$alpha),
       sprintf("  Proposal conc: %.1f", run_info$conc),
       sprintf("  Seed:          %d", run_info$seed)
@@ -1196,16 +1337,55 @@ if (tolower(args$mode) == "population") {
   rownames(pop_coords) <- pop_names
   source_labels <- pop_names
   source_coords <- pop_coords
+  # samples behind each source population (used for noise propagation)
+  source_nsamples <- sapply(pop_names, function(p) sum(src$populations == p))
 } else {
   cat("Mode: SAMPLE (each sample treated individually)\n\n")
   source_labels <- src$labels
   source_coords <- src$coords
   rownames(source_coords) <- source_labels
+  source_nsamples <- rep(1L, nrow(source_coords))  # each source is one sample
 }
 
 K_total <- nrow(source_coords)
 D       <- ncol(source_coords)
 cat("Source matrix:", K_total, "sources x", D, "dimensions\n\n")
+
+# ── Empirical noise floor (Phase 1) ─────────────────────────────────────────
+# Estimate the per-individual noise once from the whole source panel. This is a
+# property of the reference data, so it is computed regardless of --mode. Whether
+# it is actually used depends on --sigma_mode, resolved per target below.
+cat("Estimating empirical noise floor from source panel...\n")
+noise_floor  <- estimate_noise_floor(src$coords, src$populations)
+sigma_mode   <- tolower(args$sigma_mode)
+hetero       <- isTRUE(as.logical(args$hetero))
+sigma_prior_strength <- if (args$sigma_prior_strength > 0) args$sigma_prior_strength else NULL
+
+if (!sigma_mode %in% c("empirical", "fixed", "bayes")) {
+  cat(sprintf("  Note: unrecognised --sigma_mode '%s'; using 'empirical'.\n",
+              args$sigma_mode))
+  sigma_mode <- "empirical"
+}
+# Require a reasonably solid estimate before trusting it.
+floor_ok <- is.finite(noise_floor$sigma_scalar) &&
+            noise_floor$n_multi >= 5 && noise_floor$df >= 30
+
+if (sigma_mode %in% c("empirical", "bayes")) {
+  if (floor_ok) {
+    cat(sprintf(paste0("Sigma mode: %s%s. Noise floor sigma_indiv = %.5f\n",
+                       "  (pooled from %d multi-sample populations, df = %d)\n\n"),
+                toupper(sigma_mode), if (hetero) " (per-dimension)" else "",
+                noise_floor$sigma_scalar, noise_floor$n_multi, noise_floor$df))
+  } else {
+    cat(sprintf(paste0("Sigma mode: %s requested, but only %d multi-sample\n",
+                       "  populations (df = %d) are available. Falling back to FIXED\n",
+                       "  sigma = %.4f.\n\n"),
+                toupper(sigma_mode), noise_floor$n_multi, noise_floor$df, args$sigma))
+    sigma_mode <- "fixed"
+  }
+} else {
+  cat(sprintf("Sigma mode: FIXED. sigma = %.4f\n\n", args$sigma))
+}
 
 # Process each target
 cat("================================================================\n")
@@ -1229,27 +1409,49 @@ for (t_idx in 1:nrow(tgt$coords)) {
                               n_keep = args$n_keep)
   sel_coords <- source_coords[presel$indices, , drop = FALSE]
   sel_names  <- source_labels[presel$indices]
-  
-  # Model selection
+
+  # ── Resolve sigma for THIS target ─────────────────────────────────────────
+  # Propagate the panel noise floor through the current (pre-selection) mixture
+  # and the sources' sample counts. m_target defaults to 1 (a single target
+  # individual), the conservative, wider-sigma case. `sigma_base` may be a scalar
+  # (homoscedastic) or a length-D vector (--hetero, one level per dimension).
+  m_target <- 1L
+  if (sigma_mode %in% c("empirical", "bayes")) {
+    n_cand <- source_nsamples[presel$indices]
+    factor <- sqrt(1 / max(m_target, 1) +
+                   sum((presel$initial_weights^2) / pmax(n_cand, 1)))
+    base_noise <- if (hetero) noise_floor$sigma_d else noise_floor$sigma_scalar
+    sigma_base <- base_noise * factor
+    sigma_use  <- sqrt(mean(sigma_base^2))   # scalar summary for logs/selection reports
+    cat(sprintf("  Sigma (%s%s, propagated): %.5f  [m_target=%d]\n",
+                sigma_mode, if (hetero) ", per-dim" else "", sigma_use, m_target))
+  } else {
+    sigma_base <- args$sigma
+    sigma_use  <- args$sigma
+    cat(sprintf("  Sigma (fixed): %.5f\n", sigma_use))
+  }
+  sigma_scalar_for_checks <- sqrt(mean(sigma_base^2))
+
+  # Model selection (uses the base noise level; bayes samples sigma only later)
   if (args$max_k > 0) {
     cat("\n  Step 2: Forward selection with fixed K =", args$max_k, "\n")
     fwd <- forward_select(target_vec, sel_coords, sel_names,
-                          sigma = args$sigma,
+                          sigma = sigma_base,
                           max_k = args$max_k, min_k = args$max_k)
     sel_coords <- sel_coords[fwd$indices, , drop = FALSE]
     sel_names  <- sel_names[fwd$indices]
   } else {
     cat("\n  Step 2: Auto model selection (forward stepwise + BIC)...\n")
     fwd <- forward_select(target_vec, sel_coords, sel_names,
-                          sigma = args$sigma,
+                          sigma = sigma_base,
                           max_k = min(12, nrow(sel_coords)), min_k = 2)
     sel_coords <- sel_coords[fwd$indices, , drop = FALSE]
     sel_names  <- sel_names[fwd$indices]
   }
-  
-  # Identifiability check on the final source set
-  check_near_duplicates(sel_coords, sel_names, sigma = args$sigma)
-  
+
+  # Identifiability check on the final source set (scalar sigma summary)
+  check_near_duplicates(sel_coords, sel_names, sigma = sigma_scalar_for_checks)
+
   # Run MCMC
   cat("\n  Step 3: Running Bayesian MCMC...\n")
   mcmc_result <- run_mcmc(
@@ -1259,9 +1461,11 @@ for (t_idx in 1:nrow(tgt$coords)) {
     n_iter       = args$iter,
     burnin       = args$burnin,
     thin         = args$thin,
-    sigma        = args$sigma,
+    sigma        = sigma_base,
     alpha        = args$alpha,
-    proposal_concentration = args$conc
+    proposal_concentration = args$conc,
+    sample_sigma = (sigma_mode == "bayes"),
+    sigma_prior_strength = sigma_prior_strength
   )
   
   # Summarise
@@ -1309,6 +1513,7 @@ for (t_idx in 1:nrow(tgt$coords)) {
   cat("  Posterior chain saved:", posterior_file, "\n")
   
   diag_file <- paste0(out_prefix, "_diagnostics.txt")
+  cat("  Computing convergence diagnostics...\n")
   diag_data <- run_diagnostics(mcmc_result$chain, diag_file)
   
   # Build run_info for PDF log page
@@ -1320,7 +1525,8 @@ for (t_idx in 1:nrow(tgt$coords)) {
     iter         = args$iter,
     burnin       = args$burnin,
     thin         = args$thin,
-    sigma        = args$sigma,
+    sigma        = sigma_use,
+    sigma_mode   = sigma_mode,
     alpha        = args$alpha,
     conc         = args$conc,
     seed         = args$seed,

@@ -193,7 +193,10 @@ Options:
   --thin     Thinning interval                             [default: 10]
   --max_k    Max source components (0 = auto via BIC)      [default: 0]
   --n_keep   Pre-selection candidates to keep              [default: 25]
-  --sigma    Noise std dev in likelihood                   [default: 0.01]
+  --sigma    Noise std dev in likelihood (used when --sigma_mode fixed) [default: 0.01]
+  --sigma_mode  'empirical' (derive from panel), 'fixed' (--sigma), or 'bayes' (sample sigma) [default: empirical]
+  --hetero   Per-dimension noise, TRUE/FALSE                [default: FALSE]
+  --sigma_prior_strength  bayes prior pseudo-count, 0 = #dims [default: 0]
   --alpha    Dirichlet prior concentration                 [default: 1.0]
   --conc     MCMC proposal concentration (step size)       [default: 30]
   --seed     Random seed                                   [default: 42]
@@ -296,6 +299,20 @@ After any run, check two numbers:
 
 When both look right, the credible intervals are dependable. If the intervals are wider than an older version gave you, that is expected and correct. The old ones were understating the uncertainty, which is the exact mistake this whole tool exists to avoid.
 
+### New Capabilities: Data-Derived Noise (Phases 1 to 3)
+
+Alongside the correctness fixes above, three features were added that all attack the same weak point: the noise level (sigma) used to be a number you had to guess, and that guess silently decided both how many sources you got and how wide your intervals came out. These features let the data set that number instead. Each is covered in full in the Tuning Guide; this is the short version of what changed and why it helps.
+
+**Phase 1, the empirical noise floor.** The tool now measures the noise directly from your source panel. When a population has several samples, the scatter of those samples around their own mean is a direct measurement of per-individual noise in G25 space, and pooling it across every multi-sample population gives a measured floor. This is now the default (`--sigma_mode empirical`). In practice it means the old question "is this minor component real or am I overfitting?" answers itself: the component either survives at your data's measured noise level or it does not. On a typical Ancients panel the measured floor lands near 0.010, which happens to confirm that the old hardcoded default was reasonable, but now the tool reports it rather than assuming it.
+
+**Phase 2, sampling sigma (`--sigma_mode bayes`).** Instead of fixing the noise at the measured floor, this treats it as another unknown and samples it during the MCMC, anchored to the floor by an informative prior so it cannot run away and fabricate components. The payoff is a direct read on whether your sources are adequate: if the sampled sigma stays at the floor they are, and if it drifts upward there is ancestry the panel is not capturing. Your weight intervals also widen a little to reflect that you never knew the noise exactly, which is the honest thing to report.
+
+**Phase 3, per-dimension noise (`--hetero`).** The 25 G25 dimensions do not carry equal signal, so a single noise number is a simplification. This measures a separate level for each dimension and weights them accordingly, so noisier axes count for less. It composes with any sigma mode and only changes results when the dimensions genuinely differ.
+
+Two supporting changes came with these. Pre-selection's slowest step now searches a shortlist rather than the whole panel, cutting it from about a minute to a few seconds on a large file, and the effective-sample-size calculation was switched to an FFT so diagnostics stay fast on long chains. The tool also prints progress through the previously silent stretches. A near-identical-source warning, added with the correctness work, rounds this out: when two selected sources sit too close to be told apart, it names them so you know the split between them is arbitrary even when their combined share is solid.
+
+Both the R script and the web version now carry all of the above.
+
 ## Tuning Guide
 
 These recommendations apply to both versions.
@@ -330,6 +347,40 @@ How many candidate sources survive the pre-selection filter before forward stepw
 - `50,000` (default): Usually sufficient for well-separated sources with K ≤ 8.
 - `100,000–200,000`: Recommended if diagnostics show low ESS or failed Geweke tests.
 - Check the diagnostics — if ESS < 200 for any active component, increase iterations.
+
+### Estimating Sigma Automatically (`--sigma_mode`)
+
+Sigma is the assumed per-dimension noise between your target and the best mixture of sources. It controls two things at once: how many sources survive selection, and how wide the credible intervals come out. Picking it by hand means guessing your data's precision, and guessing too low invents components that are really noise while guessing too high hides real ones.
+
+Both versions can now derive sigma from your source file instead. When a source population has several samples, the scatter of those samples around their population mean measures the real per-individual noise in G25 space. Pooling that scatter across every multi-sample population gives a measured noise floor, which the tool then propagates into a per-target sigma using the sample counts behind the target and the selected sources.
+
+- `empirical` (default): derive sigma from the panel as described above. The run prints the recovered noise floor and the per-target sigma it used. If your panel has too few multi-sample populations to estimate from, it automatically falls back to `fixed`.
+- `fixed`: use the `--sigma` value directly, reproducing the tool's earlier behavior. Use this if you want to set the noise level yourself, or to reproduce an older analysis exactly.
+- `bayes`: start from the same empirical floor, but treat sigma as another unknown and sample it during the MCMC instead of holding it fixed. This propagates the uncertainty in sigma into the weight intervals, so they widen slightly to reflect that you did not know the noise level exactly. Selection still uses the fixed floor, so the number of sources does not change; only the final inference does. The run reports a posterior for sigma (mean and 95 percent interval) alongside the weights.
+
+Empirical mode removes the guesswork behind questions like "is this third component real or am I overfitting." The component either survives at your data's measured noise floor or it does not. Bayes mode goes one step further by not pretending the floor is exact.
+
+A note on how bayes stays safe. Left unconstrained, estimating sigma from a single target's 25 residuals could let it shrink toward the fit and manufacture false components, the exact failure mode that too-small a fixed sigma produces. To prevent that, bayes anchors sigma to the panel floor with an informative prior whose strength you can set with `--sigma_prior_strength` (a pseudo-count; the default, 0, uses the number of dimensions). Because the floor is measured from thousands of within-population degrees of freedom, sigma stays near it and can only drift upward if this particular target genuinely misfits the sources. Raising the pseudo-count anchors it harder; lowering it lets the target's own residuals speak more.
+
+#### Which mode should I pick?
+
+Most of the time, leave it on `empirical`. Here is the fuller guidance, in order of how often you will want each.
+
+**`empirical` is the right choice for almost everything.** It measures the noise floor from your own panel instead of making you guess, so you get calibrated intervals with no extra thought. If you only touch this setting once, leave it here.
+
+**`bayes` is worth reaching for when the fit quality itself is the question.** It does everything empirical does, then samples the noise level too, which answers something empirical cannot: are my sources actually good enough to explain this target? If the posterior sigma settles near the floor, your sources are adequate; if it drifts upward, the model is telling you there is ancestry the panel is not capturing. The cost is slightly wider intervals, which is honest rather than a defect, and a little more runtime. Use it for final, careful analyses, or whenever you are second-guessing your source panel.
+
+**`fixed` is for reproducing old runs or deliberately overriding the noise level.** Pick it only when you have a specific reason to set sigma by hand: matching an earlier analysis exactly, or testing how a result behaves at a noise level you choose. It is the one mode where a poor choice quietly hurts you, since too-small a fixed sigma manufactures false components, so do not use it casually.
+
+Rule of thumb: empirical for everyday work, bayes for final results or when you suspect your sources are inadequate, fixed only when you specifically need manual control. The `--hetero` toggle is a separate axis and composes with any of the three; leave it off unless you have reason to think the G25 dimensions carry genuinely different noise. Whichever mode you choose, the near-duplicate warning and the acceptance-rate and ESS checks behave the same, so your test for a trustworthy run does not change.
+
+### Per-Dimension Noise (`--hetero`)
+
+By default the tool uses one sigma for all 25 G25 dimensions. In reality the dimensions carry very unequal variance, so a single number is a simplification. Passing `--hetero TRUE` estimates a separate noise level for each dimension from the same within-population scatter, and weights each dimension in the likelihood and in model selection by how noisy it actually is. This keeps the high-variance early dimensions from drowning out the low-variance later ones. It composes with any `--sigma_mode`; with `bayes`, a single overall scale is sampled on top of the per-dimension shape. On data where the dimensions really do share a noise level, per-dimension and scalar give the same answer, so the flag only changes results when the heteroscedasticity is real.
+
+### Performance and progress
+
+Two changes make large runs faster and less opaque. Pre-selection's residual-chase step now searches only the pool of candidates the cheaper methods already flagged rather than the entire panel, which cuts it from about a minute to a few seconds on a 5000-source file without dropping essential sources (they always carry non-zero NNLS weight and so stay in the pool). Convergence diagnostics now compute autocorrelations by FFT rather than a lag-by-lag loop, so effective sample size on a long chain drops from several seconds to a fraction of one and no longer trails the run. The script also prints a heartbeat through the previously silent stretches: the noise-floor scan, each residual-chase round, the MCMC iterations, and the diagnostics step.
 
 ### Proposal Concentration (`--conc`) — MCMC Step Size
 

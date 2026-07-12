@@ -217,6 +217,54 @@ textarea::placeholder { color: var(--text3); }
   letter-spacing: 0.05em;
 }
 
+/* ── Info tooltips ── */
+.info {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: #6b7cff;
+  font-size: 0.72rem;
+  margin-left: 3px;
+  text-transform: none;
+  vertical-align: middle;
+  outline: none;
+}
+.info .tip {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  position: absolute;
+  left: 0;
+  top: 150%;
+  z-index: 60;
+  width: 250px;
+  background: #12182a;
+  border: 1px solid #2b3550;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.72rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #b9c1d4;
+  font-weight: 400;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  white-space: normal;
+  pointer-events: none;
+}
+.info:hover .tip,
+.info:focus .tip { visibility: visible; opacity: 1; }
+.info .tip b { color: #eef1f8; font-weight: 600; }
+.info .tip .tech {
+  display: block;
+  margin-top: 7px;
+  color: #79839c;
+  font-size: 0.68rem;
+}
+/* keep the last few tooltips from clipping off the right edge */
+.params-row .param-group:nth-last-child(-n+4) .info .tip { left: auto; right: 0; }
+
 .param-group input[type=number],
 .param-group select {
   background: var(--bg2);
@@ -496,46 +544,65 @@ canvas { max-width: 100%; }
   <!-- ═══ Parameters ═══ -->
   <div class="params-row">
     <div class="param-group">
-      <label>Mode</label>
+      <label>Mode <span class="info" tabindex="0">ⓘ<span class="tip"><b>How sources are built.</b> Population averages each population into one point (standard, faster). Sample treats every individual as its own source.<span class="tech">Population mode uses the per-population mean coordinate.</span></span></span></label>
       <select id="param-mode">
         <option value="population">Population</option>
         <option value="sample">Sample</option>
       </select>
     </div>
     <div class="param-group">
-      <label>Iterations</label>
+      <label>Iterations <span class="info" tabindex="0">ⓘ<span class="tip"><b>How many steps the sampler takes.</b> More steps means a smoother, more reliable estimate but a longer run. 50,000 is fine for a quick look; 200,000+ for final results.<span class="tech">Total Metropolis-Hastings iterations before thinning.</span></span></span></label>
       <input type="number" id="param-iter" value="50000" min="1000" step="1000">
     </div>
     <div class="param-group">
-      <label>Burn-in</label>
+      <label>Burn-in <span class="info" tabindex="0">ⓘ<span class="tip"><b>Early steps to discard.</b> The sampler needs a moment to find its footing; those first steps aren't representative yet. Keep it around 10-20% of Iterations.<span class="tech">Warm-up iterations dropped before sampling; also lets the step-size auto-tune.</span></span></span></label>
       <input type="number" id="param-burnin" value="10000" min="100" step="1000">
     </div>
     <div class="param-group">
-      <label>Thin</label>
+      <label>Thin <span class="info" tabindex="0">ⓘ<span class="tip"><b>Keep every Nth step.</b> Neighbouring steps are similar, so keeping one in ten trims the saved data without losing much. 10 is a good default.<span class="tech">Thinning interval applied after burn-in.</span></span></span></label>
       <input type="number" id="param-thin" value="10" min="1">
     </div>
     <div class="param-group">
-      <label>Max K</label>
+      <label>Max K <span class="info" tabindex="0">ⓘ<span class="tip"><b>Force a set number of sources.</b> Leave at 0 to let the tool choose. Set to 1 to allow a single-source answer; set higher to force that many.<span class="tech">0 = auto via BIC with a floor of 2 sources; any value >0 fixes K.</span></span></span></label>
       <input type="number" id="param-maxk" value="0" min="0" max="20">
     </div>
     <div class="param-group">
-      <label>Pre-select N</label>
+      <label>Pre-select N <span class="info" tabindex="0">ⓘ<span class="tip"><b>Size of the candidate shortlist.</b> How many sources to consider in detail out of your whole panel. Higher casts a wider net (slower); lower is faster but may miss a distinct source. 25-250 is typical.<span class="tech">Candidates kept after multi-strategy pre-selection (distance, NNLS, residual-chase, direction).</span></span></span></label>
       <input type="number" id="param-nkeep" value="25" min="2" max="100">
     </div>
     <div class="param-group">
-      <label>Sigma</label>
+      <label>Sigma mode <span class="info" tabindex="0">ⓘ<span class="tip"><b>How the noise level is chosen.</b> Empirical measures it from your panel's own sample scatter (recommended). Fixed uses the Sigma box. Bayes measures it and then samples it too, so the intervals honestly widen to reflect that you didn't know it exactly.<span class="tech">Empirical = pooled within-population SD, propagated per target; bayes adds a Gibbs step with an Inverse-Gamma prior anchored to that floor.</span></span></span></label>
+      <select id="param-sigma-mode">
+        <option value="empirical">Empirical</option>
+        <option value="fixed">Fixed</option>
+        <option value="bayes">Bayes</option>
+      </select>
+    </div>
+    <div class="param-group">
+      <label>Sigma <span class="info" tabindex="0">ⓘ<span class="tip"><b>Assumed noise level.</b> Only used when Sigma mode is Fixed. Smaller finds more components but risks fitting noise; larger is more conservative.<span class="tech">Gaussian likelihood standard deviation per G25 dimension.</span></span></span></label>
       <input type="number" id="param-sigma" value="0.01" min="0.0001" step="0.001">
     </div>
     <div class="param-group">
-      <label>Alpha</label>
+      <label>Per-dim noise <span class="info" tabindex="0">ⓘ<span class="tip"><b>One noise level, or one per coordinate.</b> Off uses a single level for all 25 axes. On measures a separate level per axis so noisier axes count for less. Only changes results when the axes truly differ.<span class="tech">Heteroscedastic per-dimension sigma in the likelihood and BIC.</span></span></span></label>
+      <select id="param-hetero">
+        <option value="false">Off</option>
+        <option value="true">On</option>
+      </select>
+    </div>
+    <div class="param-group">
+      <label>Sigma prior <span class="info" tabindex="0">ⓘ<span class="tip"><b>Bayes mode only.</b> How firmly the sampled noise level is held to the measured floor. 0 uses a sensible default (the number of coordinates). Higher pins it to the floor; lower lets your target's own fit move it.<span class="tech">Pseudo-count of the Inverse-Gamma prior on the noise scale.</span></span></span></label>
+      <input type="number" id="param-prior" value="0" min="0" step="1">
+    </div>
+    <div class="param-group">
+      <label>Alpha <span class="info" tabindex="0">ⓘ<span class="tip"><b>Preference for sparse answers.</b> 1.0 is neutral. Below 1 favours mixtures where a few sources carry most of the weight, suppressing tiny noise-level components.<span class="tech">Dirichlet prior concentration on the weights.</span></span></span></label>
       <input type="number" id="param-alpha" value="1.0" min="0.01" step="0.1">
     </div>
     <div class="param-group">
-      <label>Proposal conc.</label>
+      <label>Proposal conc. <span class="info" tabindex="0">ⓘ<span class="tip"><b>Sampler step size.</b> Auto-tuned during burn-in, so you rarely touch it. Raise it if the acceptance rate comes out too low; lower it if too high. 30 is a good start.<span class="tech">Dirichlet proposal concentration; higher = smaller, more cautious steps.</span></span></span></label>
       <input type="number" id="param-conc" value="30" min="2" max="5000" step="1">
     </div>
     <div class="param-group">
-      <label>Seed</label>
+      <label>Seed <span class="info" tabindex="0">ⓘ<span class="tip"><b>Reproducibility control.</b> Fixes the random stream so a run repeats exactly. Change it to check that a result holds up across different random starts.<span class="tech">PRNG seed (mulberry32).</span></span></span></label>
       <input type="number" id="param-seed" value="42" min="1">
     </div>
     <div class="param-group" style="align-self:end">
@@ -679,6 +746,53 @@ function parseG25(text) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// EMPIRICAL NOISE FLOOR (Phase 1)
+// ═══════════════════════════════════════════════════════════════════════════
+// The scatter of samples around their own population mean measures the
+// per-individual noise in G25 space. Pooling it across every population with
+// >= 2 samples gives a data-derived noise floor, so sigma need not be guessed.
+function estimateNoiseFloor(coords, populations) {
+  const D = coords[0].length;
+  const ss = new Float64Array(D);
+  let df = 0, nMulti = 0;
+  const groups = new Map();
+  for (let i = 0; i < populations.length; i++) {
+    const p = populations[i];
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(i);
+  }
+  for (const idx of groups.values()) {
+    if (idx.length < 2) continue;                 // singletons carry no within-group info
+    const mu = new Float64Array(D);
+    for (const i of idx) for (let d = 0; d < D; d++) mu[d] += coords[i][d];
+    for (let d = 0; d < D; d++) mu[d] /= idx.length;
+    for (const i of idx) for (let d = 0; d < D; d++) { const r = coords[i][d] - mu[d]; ss[d] += r*r; }
+    df += idx.length - 1;
+    nMulti++;
+  }
+  if (df < 1) return { sigmaScalar: NaN, sigmaD: new Array(D).fill(NaN), df: 0, nMulti: 0 };
+  const varD = Array.from(ss, v => v / df);
+  const meanVar = varD.reduce((a,b) => a+b, 0) / D;
+  return { sigmaScalar: Math.sqrt(meanVar), sigmaD: varD.map(Math.sqrt), df, nMulti };
+}
+
+// Propagation factor turning the per-individual floor into this target's residual
+// sigma:  sigma_resid = floor * sqrt( 1/m_target + sum_k w_k^2 / n_k )
+function propagationFactor(weights, nSamplesPerSource, mTarget) {
+  let srcTerm = 0;
+  for (let k = 0; k < weights.length; k++) {
+    srcTerm += (weights[k] * weights[k]) / Math.max(nSamplesPerSource[k], 1);
+  }
+  return Math.sqrt(1 / Math.max(mTarget, 1) + srcTerm);
+}
+
+function rmsOf(v) { // scalar summary of a scalar-or-array sigma
+  if (!Array.isArray(v)) return v;
+  let s = 0; for (const x of v) s += x*x; return Math.sqrt(s / v.length);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LINEAR ALGEBRA HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -747,14 +861,18 @@ function solveNNLS(targetVec, sourceMat, maxIter = 2000, tol = 1e-8) {
 // PRE-SELECTION
 // ═══════════════════════════════════════════════════════════════════════════
 
-function residualChase(targetVec, sourceMat, nRounds = 12) {
+function residualChase(targetVec, sourceMat, nRounds = 12, restrictTo = null) {
   const K = sourceMat.length;
+  // Only search within the supplied pool (defaults to all). Essential sources
+  // always carry NNLS weight and so are already in the pool; restricting the
+  // search here cuts cost ~10x on large panels.
+  const pool = restrictTo || [...Array(K).keys()];
   const selected = [];
   let residual = targetVec.slice();
 
   for (let round = 0; round < nRounds; round++) {
     let bestJ = -1, bestRSS = Infinity;
-    for (let j = 0; j < K; j++) {
+    for (const j of pool) {
       if (selected.includes(j)) continue;
       const trial = [...selected, j];
       const trialMat = trial.map(i => sourceMat[i]);
@@ -793,16 +911,18 @@ function preselectSources(targetVec, sourceMat, sourceNames, nKeep, log) {
   const nnlsSet = [...new Set([...nnlsActive, ...nnlsTop])];
   log('', `    NNLS: ${nnlsActive.length} active, ${nnlsSet.length} total`);
 
-  // Method 3: residual chase
-  const chaseSet = residualChase(targetVec, sourceMat, 12);
-  log('', `    Residual chase: ${chaseSet.length} candidates`);
-
-  // Method 4: direction
+  // Method 4: direction (computed before chase so it can join the pool)
   const tNorm = vecNorm(targetVec) + 1e-15;
   const targetUnit = targetVec.map(v => v / tNorm);
   const cosSim = sourceMat.map(s => dot(s, targetUnit) / (vecNorm(s) + 1e-15));
   const dirOrder = [...Array(K).keys()].sort((a,b) => cosSim[b]-cosSim[a]);
   const dirTop = dirOrder.slice(0, Math.min(Math.ceil(nKeep/3), K));
+
+  // Method 3: residual chase, restricted to the pooled candidates (~10x faster)
+  const chasePool = [...new Set([...distTop, ...nnlsSet, ...dirTop])];
+  log('', `    Residual chase: searching ${chasePool.length} pooled candidates...`);
+  const chaseSet = residualChase(targetVec, sourceMat, 12, chasePool);
+  log('', `    Residual chase: ${chaseSet.length} candidates`);
 
   // Combine
   let allCandidates = [...new Set([...nnlsSet, ...chaseSet, ...distTop, ...dirTop])];
@@ -831,9 +951,20 @@ function preselectSources(targetVec, sourceMat, sourceNames, nKeep, log) {
 function computeBIC(targetVec, sourceMat, w, sigma, kActive) {
   const pred = weightedSum(w, sourceMat);
   const resid = vecSub(targetVec, pred);
-  const rss = dot(resid, resid);
   const n = targetVec.length;
-  const logLik = -n/2 * Math.log(2 * Math.PI * sigma * sigma) - rss / (2 * sigma * sigma);
+  let logLik;
+  if (Array.isArray(sigma)) {
+    let ss = 0, logdet = 0;
+    for (let i = 0; i < n; i++) {
+      const r = resid[i] / sigma[i];
+      ss += r * r;
+      logdet += Math.log(2 * Math.PI * sigma[i] * sigma[i]);
+    }
+    logLik = -0.5 * logdet - 0.5 * ss;
+  } else {
+    const rss = dot(resid, resid);
+    logLik = -n/2 * Math.log(2 * Math.PI * sigma * sigma) - rss / (2 * sigma * sigma);
+  }
   return -2 * logLik + (kActive - 1) * Math.log(n);
 }
 
@@ -946,6 +1077,14 @@ function checkNearDuplicates(coords, names, sigma, log, sdThreshold = 0.25) {
 function logLikelihood(w, targetVec, sourceMat, sigma) {
   const pred = weightedSum(w, sourceMat);
   let ss = 0;
+  if (Array.isArray(sigma)) {
+    // per-dimension noise (heteroscedastic)
+    for (let i = 0; i < targetVec.length; i++) {
+      const r = (targetVec[i] - pred[i]) / sigma[i];
+      ss += r * r;
+    }
+    return -ss / 2;
+  }
   for (let i = 0; i < targetVec.length; i++) {
     const r = targetVec[i] - pred[i];
     ss += r * r;
@@ -1013,25 +1152,39 @@ function lgamma(x) {
 // MCMC SAMPLER
 // ═══════════════════════════════════════════════════════════════════════════
 
-function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, alpha, initConc, log, progressCb) {
+function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, alpha, initConc, log, progressCb,
+                 sampleSigma = false, sigmaPriorStrength = null) {
   const K = sourceMat.length;
+  const D = targetVec.length;
   let wCurrent = new Array(K).fill(1/K);
   const nSave = Math.floor((nIter - burnin) / thin);
   const chain = [];
   const logPostTrace = new Float64Array(nIter);
   let acceptCount = 0;
-  let acceptSinceAdapt = 0;         // accepts within the current adaptation window
-  const adaptWindow = 500;          // iterations per adaptation step
+  let acceptSinceAdapt = 0;
+  const adaptWindow = 500;
   let conc = (initConc && initConc >= 2) ? initConc : 30;
 
-  let lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigma, alpha);
+  // `sigma` is the BASE noise level (scalar or per-dimension array). In bayes
+  // mode we sample a single scale k on top of it (effective sigma = k * base),
+  // with an Inverse-Gamma prior on k^2 centred at 1 (on the empirical floor).
+  const sigmaBase = sigma;
+  const rmsBase = rmsOf(sigmaBase);
+  const scaleSigma = (base, s) => Array.isArray(base) ? base.map(x => x*s) : base*s;
+  const nu0 = (sigmaPriorStrength && sigmaPriorStrength > 0) ? sigmaPriorStrength : D;
+  const a0 = nu0/2 + 1, b0 = nu0/2;
+  let k2 = 1;
+  let sigmaCur = sigmaBase;
+  const sigmaSamples = sampleSigma ? [] : null;
 
-  log('step', `  MCMC: ${nIter} iterations (burn-in: ${burnin}, thin: ${thin})`);
+  let lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigmaCur, alpha);
+
+  log('step', `  MCMC: ${nIter} iterations (burn-in: ${burnin}, thin: ${thin})${sampleSigma ? ' [sampling sigma]' : ''}`);
 
   for (let i = 0; i < nIter; i++) {
     const prop = proposeDirichlet(wCurrent, conc);
     const wProposed = prop.w;
-    const lpProposed = logPosterior(wProposed, targetVec, sourceMat, sigma, alpha);
+    const lpProposed = logPosterior(wProposed, targetVec, sourceMat, sigmaCur, alpha);
 
     const alphaFwd = wCurrent.map(v => Math.max(0.01, conc * v));
     const alphaRev = wProposed.map(v => Math.max(0.01, conc * v));
@@ -1047,31 +1200,41 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
       acceptSinceAdapt++;
     }
 
+    // Gibbs update of the noise scale (bayes mode). Conjugate Inverse-Gamma.
+    if (sampleSigma) {
+      const pred = weightedSum(wCurrent, sourceMat);
+      let uSS = 0;
+      if (Array.isArray(sigmaBase)) {
+        for (let d = 0; d < D; d++) { const r = (targetVec[d]-pred[d]) / sigmaBase[d]; uSS += r*r; }
+      } else {
+        for (let d = 0; d < D; d++) { const r = targetVec[d]-pred[d]; uSS += r*r; } uSS /= (sigmaBase*sigmaBase);
+      }
+      k2 = (b0 + uSS/2) / Math.max(randGamma(a0 + D/2), 1e-300);   // 1/Gamma(A,rate=B)
+      sigmaCur = scaleSigma(sigmaBase, Math.sqrt(k2));
+      lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigmaCur, alpha);
+    }
+
     logPostTrace[i] = lpCurrent;
 
     if (i >= burnin && ((i - burnin) % thin === 0)) {
       chain.push(wCurrent.slice());
+      if (sampleSigma) sigmaSamples.push(Math.sqrt(k2) * rmsBase);
     }
 
-    // Adaptive proposal during burn-in.
-    // NOTE: `conc` is the Dirichlet proposal concentration, so a HIGHER conc
-    // means proposals cluster tightly around the current point => a HIGHER
-    // acceptance rate. The adjustment therefore has to run *opposite* to the
-    // acceptance rate: too many accepts => proposals too timid => LOOSEN
-    // (lower conc); too few accepts => proposals too bold => TIGHTEN (raise
-    // conc). We also use a windowed rate (last `adaptWindow` iterations) so the
-    // tuning reacts to recent behaviour instead of a sticky cumulative average.
+    // Adaptive proposal during burn-in (windowed rate; runs opposite to accept).
     if (i < burnin && i > 0 && i % adaptWindow === 0) {
       const windowRate = acceptSinceAdapt / adaptWindow;
-      if (windowRate > 0.50) conc *= 0.8;        // loosen -> bigger steps
-      else if (windowRate < 0.20) conc *= 1.2;   // tighten -> smaller steps
+      if (windowRate > 0.50) conc *= 0.8;
+      else if (windowRate < 0.20) conc *= 1.2;
       conc = Math.max(2, Math.min(conc, 5000));
       acceptSinceAdapt = 0;
     }
 
     if (i % 5000 === 0) {
       progressCb((i / nIter) * 100);
-      log('', `    Iter ${i}/${nIter} | Accept: ${(acceptCount/(i+1)).toFixed(3)} | Conc: ${conc.toFixed(0)}`);
+      let msg = `    Iter ${i}/${nIter} | Accept: ${(acceptCount/(i+1)).toFixed(3)} | Conc: ${conc.toFixed(0)}`;
+      if (sampleSigma) msg += ` | Sigma: ${(Math.sqrt(k2)*rmsBase).toFixed(5)}`;
+      log('', msg);
     }
   }
 
@@ -1079,7 +1242,19 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
   const acceptRate = acceptCount / nIter;
   log('ok', `  Final acceptance rate: ${acceptRate.toFixed(3)}`);
 
-  return { chain, logPostTrace: Array.from(logPostTrace), acceptanceRate: acceptRate, finalConcentration: conc };
+  let sigmaPosterior = null;
+  if (sampleSigma && sigmaSamples.length > 0) {
+    const sorted = sigmaSamples.slice().sort((a,b) => a-b);
+    const q = p => sorted[Math.min(sorted.length-1, Math.floor(p*sorted.length))];
+    sigmaPosterior = {
+      mean: sigmaSamples.reduce((a,b)=>a+b,0) / sigmaSamples.length,
+      ciLo: q(0.025), ciHi: q(0.975)
+    };
+    log('ok', `  Posterior sigma: ${sigmaPosterior.mean.toFixed(5)} [${sigmaPosterior.ciLo.toFixed(5)} - ${sigmaPosterior.ciHi.toFixed(5)}]`);
+  }
+
+  return { chain, logPostTrace: Array.from(logPostTrace), acceptanceRate: acceptRate,
+           finalConcentration: conc, sigmaPosterior };
 }
 
 
@@ -1133,6 +1308,35 @@ function summarisePosterior(chain, sourceNames, threshold = 0.005) {
 // DIAGNOSTICS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// In-place iterative Cooley-Tukey FFT (radix-2). re/im are length 2^k.
+function fftInPlace(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
+                 const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = 2 * Math.PI / len * (inverse ? 1 : -1);
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cwr = 1, cwi = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = i + k + len / 2;
+        const vr = re[b] * cwr - im[b] * cwi;
+        const vi = re[b] * cwi + im[b] * cwr;
+        re[b] = re[a] - vr; im[b] = im[a] - vi;
+        re[a] = re[a] + vr; im[a] = im[a] + vi;
+        const ncwr = cwr * wr - cwi * wi;
+        cwi = cwr * wi + cwi * wr; cwr = ncwr;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+
 function effectiveSampleSize(x) {
   const n = x.length;
   if (n < 10) return n;
@@ -1142,22 +1346,27 @@ function effectiveSampleSize(x) {
   if (varX === 0) return n;
 
   const maxLag = Math.min(n - 1, Math.floor(n / 2));
-  const acf = [];
-  for (let lag = 0; lag <= maxLag; lag++) {
-    let s = 0;
-    for (let i = 0; i < n - lag; i++) s += centered[i] * centered[i + lag];
-    acf.push(s / (n * varX));
-  }
 
-  let tau = 1;
-  let k = 1;
+  // Autocovariances via FFT: zero-pad to a power of two >= 2n so the circular
+  // autocovariance equals the linear one. O(n log n) instead of O(n^2), with
+  // numerically identical acf values. acf[lag] = C(lag)/C(0).
+  let m = 1; while (m < 2 * n) m <<= 1;
+  const re = new Float64Array(m), im = new Float64Array(m);
+  for (let i = 0; i < n; i++) re[i] = centered[i];
+  fftInPlace(re, im, false);
+  for (let i = 0; i < m; i++) { re[i] = re[i]*re[i] + im[i]*im[i]; im[i] = 0; }
+  fftInPlace(re, im, true);
+  const c0 = re[0];
+  const acf = new Array(maxLag + 1);
+  for (let lag = 0; lag <= maxLag; lag++) acf[lag] = re[lag] / c0;
+
+  let tau = 1, k = 1;
   while (k + 1 <= maxLag) {
     const pairSum = acf[k] + acf[k + 1];
     if (pairSum < 0) break;
     tau += 2 * pairSum;
     k += 2;
   }
-
   return Math.max(1, Math.floor(n / tau));
 }
 
@@ -1563,6 +1772,9 @@ async function runAnalysis() {
   const sigma = parseFloat(document.getElementById('param-sigma').value) || 0.01;
   const alpha = parseFloat(document.getElementById('param-alpha').value) || 1.0;
   const initConc = parseFloat(document.getElementById('param-conc').value) || 30;
+  let sigmaMode = (document.getElementById('param-sigma-mode') || {}).value || 'empirical';
+  const hetero = ((document.getElementById('param-hetero') || {}).value || 'false') === 'true';
+  const sigmaPriorStrength = parseFloat((document.getElementById('param-prior') || {}).value) || 0;
   const seed = parseInt(document.getElementById('param-seed').value) || 42;
 
   rand = mulberry32(seed);
@@ -1644,13 +1856,15 @@ async function runAnalysis() {
   log('', `Dimensions: ${src.coords[0].length}`);
 
   // Aggregate if population mode
-  let sourceLabels, sourceCoords;
+  let sourceLabels, sourceCoords, sourceNsamples;
   if (mode === 'population') {
     log('', 'Mode: POPULATION (averaging within each population)');
     const popNames = [...new Set(src.populations)];
     sourceLabels = popNames;
+    sourceNsamples = [];
     sourceCoords = popNames.map(p => {
       const idxs = src.populations.map((pp, i) => pp === p ? i : -1).filter(i => i >= 0);
+      sourceNsamples.push(idxs.length);
       const D = src.coords[0].length;
       const avg = new Array(D).fill(0);
       for (const i of idxs) for (let d = 0; d < D; d++) avg[d] += src.coords[i][d];
@@ -1660,9 +1874,26 @@ async function runAnalysis() {
     log('', 'Mode: SAMPLE (each sample individually)');
     sourceLabels = src.labels;
     sourceCoords = src.coords;
+    sourceNsamples = src.coords.map(() => 1);
   }
 
   log('', `Source matrix: ${sourceCoords.length} sources x ${sourceCoords[0].length} dimensions`);
+
+  // ── Empirical noise floor (Phase 1) and sigma-mode resolution ──
+  log('', 'Estimating empirical noise floor from source panel...');
+  const noiseFloor = estimateNoiseFloor(src.coords, src.populations);
+  if (!['empirical','fixed','bayes'].includes(sigmaMode)) sigmaMode = 'empirical';
+  const floorOk = isFinite(noiseFloor.sigmaScalar) && noiseFloor.nMulti >= 5 && noiseFloor.df >= 30;
+  if (sigmaMode === 'empirical' || sigmaMode === 'bayes') {
+    if (floorOk) {
+      log('', `Sigma mode: ${sigmaMode.toUpperCase()}${hetero ? ' (per-dimension)' : ''}. Noise floor sigma_indiv = ${noiseFloor.sigmaScalar.toFixed(5)} (from ${noiseFloor.nMulti} multi-sample populations, df=${noiseFloor.df})`);
+    } else {
+      log('warn', `Sigma mode: ${sigmaMode.toUpperCase()} requested, but only ${noiseFloor.nMulti} multi-sample populations (df=${noiseFloor.df}). Falling back to FIXED sigma = ${sigma}.`);
+      sigmaMode = 'fixed';
+    }
+  } else {
+    log('', `Sigma mode: FIXED. sigma = ${sigma}`);
+  }
 
   // Yield to UI
   await new Promise(r => setTimeout(r, 50));
@@ -1684,23 +1915,32 @@ async function runAnalysis() {
     let selCoords = presel.indices.map(i => sourceCoords[i]);
     let selNames = presel.indices.map(i => sourceLabels[i]);
 
-    // Step 2: Forward selection
+    // ── Resolve sigma for THIS target ──
+    const mTarget = 1;
+    let sigmaBase;
+    if (sigmaMode === 'empirical' || sigmaMode === 'bayes') {
+      const nCand = presel.indices.map(i => sourceNsamples[i]);
+      const factor = propagationFactor(presel.initialWeights, nCand, mTarget);
+      sigmaBase = hetero ? noiseFloor.sigmaD.map(s => s * factor)
+                         : noiseFloor.sigmaScalar * factor;
+      log('', `  Sigma (${sigmaMode}${hetero ? ', per-dim' : ''}, propagated): ${rmsOf(sigmaBase).toFixed(5)} [m_target=${mTarget}]`);
+    } else {
+      sigmaBase = sigma;
+      log('', `  Sigma (fixed): ${sigma}`);
+    }
+    const sigmaScalarForChecks = rmsOf(sigmaBase);
+
+    // Step 2: Forward selection (uses the base noise level)
     log('step', '\nStep 2: Forward stepwise model selection...');
     await new Promise(r => setTimeout(r, 20));
     const effectiveMaxK = maxK > 0 ? maxK : Math.min(12, selCoords.length);
-    // Auto mode keeps a floor of 2 sources: admixture modelling normally wants
-    // at least two, and this matches the tool's established behaviour. The rare
-    // degenerate case (target essentially identical to a single source) is no
-    // longer silently misleading — checkNearDuplicates() below warns when the
-    // forced second source is non-identifiable. To genuinely allow a 1-source
-    // fit, set Max K = 1 explicitly.
     const effectiveMinK = maxK > 0 ? maxK : 2;
-    const fwd = forwardSelect(targetVec, selCoords, selNames, sigma, effectiveMaxK, effectiveMinK, log);
+    const fwd = forwardSelect(targetVec, selCoords, selNames, sigmaBase, effectiveMaxK, effectiveMinK, log);
     selCoords = fwd.indices.map(i => selCoords[i]);
     selNames = fwd.indices.map(i => selNames[i]);
 
-    // Identifiability check on the final source set
-    checkNearDuplicates(selCoords, selNames, sigma, log);
+    // Identifiability check on the final source set (scalar sigma summary)
+    checkNearDuplicates(selCoords, selNames, sigmaScalarForChecks, log);
 
     // Step 3: MCMC
     log('step', '\nStep 3: Running Bayesian MCMC...');
@@ -1708,9 +1948,9 @@ async function runAnalysis() {
 
     const mcmcResult = await new Promise(resolve => {
       setTimeout(() => {
-        const result = runMCMC(targetVec, selCoords, selNames, nIter, burnin, thin, sigma, alpha, initConc, log, pct => {
+        const result = runMCMC(targetVec, selCoords, selNames, nIter, burnin, thin, sigmaBase, alpha, initConc, log, pct => {
           progressFill.style.width = pct + '%';
-        });
+        }, sigmaMode === 'bayes', sigmaPriorStrength);
         resolve(result);
       }, 50);
     });
@@ -1785,6 +2025,7 @@ async function runAnalysis() {
       <div class="diag-card"><div class="label">Accept Rate</div><div class="value ${mcmcResult.acceptanceRate >= 0.2 && mcmcResult.acceptanceRate <= 0.5 ? 'good' : 'warn'}">${mcmcResult.acceptanceRate.toFixed(3)}</div></div>
       <div class="diag-card"><div class="label">Chain Length</div><div class="value ${mcmcResult.chain.length === 0 ? 'bad' : ''}">${mcmcResult.chain.length}</div></div>
       <div class="diag-card"><div class="label">Sources Selected</div><div class="value">${selNames.length}</div></div>
+      ${mcmcResult.sigmaPosterior ? `<div class="diag-card"><div class="label">Posterior &sigma;</div><div class="value">${mcmcResult.sigmaPosterior.mean.toFixed(4)}<div style="font-size:0.6rem;color:var(--text3);margin-top:2px;">[${mcmcResult.sigmaPosterior.ciLo.toFixed(4)} – ${mcmcResult.sigmaPosterior.ciHi.toFixed(4)}]</div></div></div>` : ''}
     </div>`;
 
     // Bar chart
