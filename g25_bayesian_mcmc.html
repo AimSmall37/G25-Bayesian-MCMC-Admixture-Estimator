@@ -333,6 +333,60 @@ textarea::placeholder { color: var(--text3); }
 .log-warn { color: var(--orange); }
 .log-err { color: var(--red); }
 
+/* Per-iteration "Iter N/M | Accept: ... | Conc: ..." lines — instantly
+   hidden/shown by the "Show iteration details" checkbox, regardless of
+   whether they were logged before or after it was toggled. */
+#log-panel.hide-iter .log-iter { display: none; }
+
+/* ── Log toolbar ── */
+.log-toolbar {
+  display: none;
+  align-items: center;
+  gap: 1.25rem;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  padding: 0.6rem 1.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--text2);
+}
+
+.log-toolbar.visible { display: flex; }
+
+.log-toolbar-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-toolbar-check input { accent-color: var(--accent); cursor: pointer; }
+
+.log-toolbar-spacer { flex: 1; }
+
+.log-toolbar-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.log-toolbar-btn:hover {
+  background: var(--bg4);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+#log-panel.with-toolbar { border-radius: 0 0 10px 10px; margin-top: 0; }
+
 /* ── Results ── */
 #results-section { display: none; }
 #results-section.visible { display: block; }
@@ -404,6 +458,131 @@ table.data-table tr:hover td { background: var(--bg3); }
 
 .sig-yes { color: var(--green); font-weight: 600; }
 .sig-no { color: var(--text3); }
+
+/* ── Comparison Matrix ── */
+.matrix-section {
+  margin-top: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.matrix-help {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--text3);
+  margin: -0.5rem 0 1.1rem;
+  max-width: 800px;
+}
+
+.matrix-help b { color: var(--text2); font-weight: 600; }
+
+.matrix-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.matrix-toolbar .spacer { flex: 1; }
+
+.matrix-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.matrix-btn:hover {
+  background: var(--bg4);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.matrix-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #2a2e38;
+}
+
+table.matrix-table {
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: #e2e4e9;
+}
+
+table.matrix-table th, table.matrix-table td {
+  padding: 0.4rem 0.55rem;
+  text-align: center;
+  white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+table.matrix-table th.matrix-rowhead, table.matrix-table td.matrix-rowhead {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: #2a2e38;
+  z-index: 2;
+}
+
+table.matrix-table th.matrix-dist, table.matrix-table td.matrix-dist {
+  color: var(--text3);
+  position: sticky;
+  left: 132px;
+  background: #2a2e38;
+  z-index: 2;
+}
+
+table.matrix-table thead th {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: #b8bcc6;
+  vertical-align: bottom;
+}
+
+table.matrix-table thead th.matrix-rowhead,
+table.matrix-table thead th.matrix-dist {
+  padding-bottom: 0.5rem;
+}
+
+table.matrix-table thead th.matrix-colname,
+table.matrix-table tbody td.matrix-colcell {
+  width: 118px;
+  min-width: 118px;
+  max-width: 118px;
+}
+
+table.matrix-table thead th.matrix-colname {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  text-align: center;
+  padding: 0.5rem 0.4rem 0.6rem;
+  line-height: 1.35;
+}
+
+table.matrix-table thead th:hover { color: #fff; }
+
+table.matrix-table thead th.sorted-col { color: var(--accent); }
+
+table.matrix-table tbody tr.matrix-avg-row td {
+  border-top: 2px solid rgba(255,255,255,0.2);
+  font-weight: 600;
+  color: #cfd2da;
+}
+
+table.matrix-table tbody tr:hover td:not(.matrix-rowhead):not(.matrix-dist) { outline: 1px solid rgba(255,255,255,0.25); outline-offset: -1px; }
+
 
 /* ── Charts ── */
 .chart-container {
@@ -615,7 +794,16 @@ canvas { max-width: 100%; }
   </div>
 
   <!-- ═══ Log ═══ -->
-  <div id="log-panel"></div>
+  <div class="log-toolbar" id="log-toolbar">
+    <label class="log-toolbar-check">
+      <input type="checkbox" id="show-iter-details" checked onchange="toggleIterDetailsVisibility(this)">
+      Show iteration details
+    </label>
+    <div class="log-toolbar-spacer"></div>
+    <button class="log-toolbar-btn" onclick="copyLog(this)">Copy Log</button>
+    <button class="log-toolbar-btn" onclick="saveLog(this)">Save Log</button>
+  </div>
+  <div id="log-panel" class="with-toolbar"></div>
 
   <!-- ═══ Results ═══ -->
   <div id="results-section"></div>
@@ -1360,7 +1548,7 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
       progressCb((i / nIter) * 100);
       let msg = `    Iter ${i}/${nIter} | Accept: ${(acceptCount/(i+1)).toFixed(3)} | Conc: ${conc.toFixed(0)}`;
       if (sampleSigma) msg += ` | Sigma: ${(Math.sqrt(k2)*rmsBase).toFixed(5)}`;
-      log('', msg);
+      log('iter', msg);
     }
   }
 
@@ -1519,17 +1707,61 @@ function gewekeZ(x) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const logEl = document.getElementById('log-panel');
+const logToolbarEl = document.getElementById('log-toolbar');
 
 function log(type, msg) {
   logEl.classList.add('visible');
+  logToolbarEl.classList.add('visible');
   const cls = type === 'header' ? 'log-header' : type === 'step' ? 'log-step' :
               type === 'ok' ? 'log-ok' : type === 'warn' ? 'log-warn' :
-              type === 'err' ? 'log-err' : '';
+              type === 'err' ? 'log-err' : type === 'iter' ? 'log-iter' : '';
   logEl.innerHTML += `<div class="${cls}">${escHtml(msg)}</div>`;
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Instantly shows/hides every "Iter N/M | Accept: ..." line already in the
+// log (not just future ones) by toggling a class on the log panel — CSS
+// does the actual hide/show, so this works no matter when the checkbox is
+// flipped, including mid-run or after the run has finished.
+function toggleIterDetailsVisibility(cb) {
+  document.getElementById('log-panel').classList.toggle('hide-iter', !cb.checked);
+}
+
+function flashBtn(btn, text) {
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.textContent = text;
+  btn.disabled = true;
+  setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1300);
+}
+
+function copyLog(btn) {
+  const text = logEl.innerText;
+  if (!text.trim()) return;
+  navigator.clipboard.writeText(text).then(() => {
+    flashBtn(btn, 'Copied ✓');
+  }).catch(() => {
+    flashBtn(btn, 'Copy failed');
+  });
+}
+
+function saveLog(btn) {
+  const text = logEl.innerText;
+  if (!text.trim()) return;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `g25_mcmc_log_${ts}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  flashBtn(btn, 'Saved ✓');
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1871,6 +2103,314 @@ function roundRect(ctx, x, y, w, h, r) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// COMPARISON MATRIX (multi-target, Vahaduo-style)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let MATRIX_STATE = null; // { sourceCols, rows: [{label,distance,values[]}], avgValues, avgDistance, originalOrder }
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function lerpColor(c1, c2, t) {
+  const p1 = hexToRgb(c1), p2 = hexToRgb(c2);
+  const r = Math.round(p1.r + (p2.r - p1.r) * t);
+  const g = Math.round(p1.g + (p2.g - p1.g) * t);
+  const b = Math.round(p1.b + (p2.b - p1.b) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+// Maps a 0-100 percentage to a dark-slate -> accent-blue -> cyan heat color,
+// saturating around 55% so low-magnitude "noise" sources stay muted and the
+// dominant components pop, similar to Vahaduo's auto distance coloring.
+function heatColor(value) {
+  const t = Math.max(0, Math.min(1, value / 55));
+  if (t < 0.55) return lerpColor('#2a2e38', '#3d6de0', t / 0.55);
+  return lerpColor('#3d6de0', '#5be0e0', (t - 0.55) / 0.45);
+}
+
+function buildMatrixData(allTargetSummaries) {
+  const sourceSet = new Set();
+  for (const t of allTargetSummaries) for (const s of t.sources) sourceSet.add(s.name);
+  const sourceCols = [...sourceSet].sort((a, b) => a.localeCompare(b));
+
+  const rows = allTargetSummaries.map(t => {
+    const map = new Map(t.sources.map(s => [s.name, s.pct]));
+    return {
+      label: t.label,
+      distance: t.distance,
+      values: sourceCols.map(c => map.get(c) || 0)
+    };
+  });
+
+  const avgValues = sourceCols.map((_, ci) =>
+    rows.reduce((sum, r) => sum + r.values[ci], 0) / rows.length);
+  const validDist = rows.map(r => r.distance).filter(d => !isNaN(d));
+  const avgDistance = validDist.length ? validDist.reduce((a, b) => a + b, 0) / validDist.length : NaN;
+
+  return { sourceCols, rows, avgValues, avgDistance, originalOrder: rows.map(r => r.label) };
+}
+
+function renderMatrixSection(allTargetSummaries) {
+  MATRIX_STATE = buildMatrixData(allTargetSummaries);
+
+  const resultsSection = document.getElementById('results-section');
+  let html = `<div class="matrix-section" id="matrix-section">
+    <div class="results-header">Comparison Matrix — All Targets</div>
+    <p class="matrix-help">Click a source column to sort every target by that population's %, highest first. Click <b>Distance</b> to sort by best overall fit (lowest first). <b>Reset Sorting</b> restores the original target order. The bottom <b>Average</b> row is the mean across all targets. Cell shading scales with the %.</p>
+    <div class="matrix-toolbar">
+      <button class="matrix-btn" onclick="resetMatrixSort()">Reset Sorting</button>
+      <div class="spacer"></div>
+      <button class="matrix-btn" onclick="copyMatrixAs('csv', this)">Copy Table as CSV</button>
+      <button class="matrix-btn" onclick="copyMatrixAs('tsv', this)">Copy Table as TSV</button>
+      <button class="matrix-btn" onclick="downloadMatrixImage(this)">Save as Image</button>
+    </div>
+    <div class="matrix-wrap" id="matrix-wrap"></div>
+  </div>`;
+  resultsSection.insertAdjacentHTML('beforeend', html);
+  drawMatrixTable();
+}
+
+// Escapes a label and inserts an invisible wrap opportunity right after each
+// underscore, so long population names ("Denmark_Jutland_Germanic_IA") wrap
+// onto new lines at underscore boundaries instead of overflowing or getting
+// broken mid-word.
+function wrapLabelHtml(label) {
+  return escHtml(label).replace(/_/g, '_\u200B');
+}
+
+function drawMatrixTable() {
+  const st = MATRIX_STATE;
+  if (!st) return;
+  const wrap = document.getElementById('matrix-wrap');
+
+  let html = '<table class="matrix-table"><thead><tr>';
+  html += `<th class="matrix-rowhead">Target</th>`;
+  html += `<th class="matrix-dist" onclick="sortMatrixBy('__distance__')">Distance</th>`;
+  for (const c of st.sourceCols) {
+    const safe = c.replace(/'/g, "\\'");
+    html += `<th class="matrix-colname" onclick="sortMatrixBy('${safe}')" title="${escHtml(c)}">${wrapLabelHtml(c)}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const row of st.rows) {
+    html += '<tr>';
+    html += `<td class="matrix-rowhead">${escHtml(row.label)}</td>`;
+    html += `<td class="matrix-dist">${isNaN(row.distance) ? 'N/A' : row.distance.toFixed(6)}</td>`;
+    for (const v of row.values) {
+      html += `<td class="matrix-colcell" style="background:${heatColor(v)}">${v.toFixed(1)}</td>`;
+    }
+    html += '</tr>';
+  }
+
+  // Average row
+  html += '<tr class="matrix-avg-row">';
+  html += `<td class="matrix-rowhead">Average</td>`;
+  html += `<td class="matrix-dist">${isNaN(st.avgDistance) ? 'N/A' : st.avgDistance.toFixed(6)}</td>`;
+  for (const v of st.avgValues) {
+    html += `<td class="matrix-colcell" style="background:${heatColor(v)}">${v.toFixed(1)}</td>`;
+  }
+  html += '</tr>';
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function sortMatrixBy(col) {
+  const st = MATRIX_STATE;
+  if (!st) return;
+  if (col === '__distance__') {
+    st.rows.sort((a, b) => a.distance - b.distance); // best (lowest distance) fit first
+  } else {
+    const ci = st.sourceCols.indexOf(col);
+    if (ci === -1) return;
+    st.rows.sort((a, b) => b.values[ci] - a.values[ci]); // highest % first
+  }
+  drawMatrixTable();
+}
+
+function resetMatrixSort() {
+  const st = MATRIX_STATE;
+  if (!st) return;
+  const order = new Map(st.originalOrder.map((label, i) => [label, i]));
+  st.rows.sort((a, b) => order.get(a.label) - order.get(b.label));
+  drawMatrixTable();
+}
+
+function matrixToDelimited(delim) {
+  const st = MATRIX_STATE;
+  if (!st) return '';
+  const lines = [];
+  lines.push(['Target', 'Distance', ...st.sourceCols].join(delim));
+  for (const row of st.rows) {
+    lines.push([row.label, isNaN(row.distance) ? '' : row.distance.toFixed(6),
+                ...row.values.map(v => v.toFixed(1))].join(delim));
+  }
+  lines.push(['Average', isNaN(st.avgDistance) ? '' : st.avgDistance.toFixed(6),
+              ...st.avgValues.map(v => v.toFixed(1))].join(delim));
+  return lines.join('\n');
+}
+
+function copyMatrixAs(kind, btn) {
+  const delim = kind === 'tsv' ? '\t' : ',';
+  const text = matrixToDelimited(delim);
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    flashBtn(btn, 'Copied ✓');
+  }).catch(() => {
+    flashBtn(btn, 'Copy failed');
+  });
+}
+
+// Renders the current matrix state onto an offscreen canvas (sized to fit
+// content, independent of on-screen CSS layout) and triggers a PNG download.
+// Wraps a label into multiple lines that fit within maxWidth, preferring to
+// break right after underscores (matching the HTML header behaviour). Falls
+// back to a hard character break for any segment that's still too wide on
+// its own (e.g. no underscores at all).
+function wrapCanvasLabel(ctx, label, maxWidth) {
+  const parts = label.split(/(?<=_)/);
+  const lines = [];
+  let cur = '';
+  for (const part of parts) {
+    const candidate = cur + part;
+    if (cur && ctx.measureText(candidate).width > maxWidth) {
+      lines.push(cur);
+      cur = part;
+    } else {
+      cur = candidate;
+    }
+    while (ctx.measureText(cur).width > maxWidth && cur.length > 1) {
+      let i = cur.length - 1;
+      while (i > 1 && ctx.measureText(cur.slice(0, i)).width > maxWidth) i--;
+      lines.push(cur.slice(0, i));
+      cur = cur.slice(i);
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function downloadMatrixImage(btn) {
+  const st = MATRIX_STATE;
+  if (!st) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const rowLabelW = 190;
+  const distColW = 90;
+  const cellW = 118;
+  const cellH = 26;
+  const padding = 24;
+  const colFont = '500 10px "JetBrains Mono", monospace';
+  const lineH = 13;
+  const headerInnerPad = { top: 10, bottom: 10 };
+
+  // Wrap every column label up front so we know exactly how tall the
+  // header needs to be — no clipping, no guesswork.
+  const measure = document.createElement('canvas').getContext('2d');
+  measure.font = colFont;
+  const wrappedCols = st.sourceCols.map(c => wrapCanvasLabel(measure, c, cellW - 10));
+  const maxLines = Math.max(1, ...wrappedCols.map(l => l.length));
+  const headerH = maxLines * lineH + headerInnerPad.top + headerInnerPad.bottom;
+
+  const nRows = st.rows.length + 1; // + average row
+  const W = padding * 2 + rowLabelW + distColW + st.sourceCols.length * cellW;
+  const H = padding * 2 + headerH + nRows * cellH + 20;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Background
+  ctx.fillStyle = '#0c0e12';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = '700 13px "DM Sans", sans-serif';
+  ctx.fillStyle = '#e2e4e9';
+  ctx.textAlign = 'left';
+  ctx.fillText('Admixture Comparison Matrix', padding, padding);
+
+  const gridTop = padding + headerH;
+  const gridLeft = padding + rowLabelW + distColW;
+
+  // Column headers — horizontal, word-wrapped at underscore boundaries,
+  // bottom-aligned so the last line of every label sits just above the grid.
+  ctx.font = colFont;
+  ctx.fillStyle = '#b8bcc6';
+  ctx.textAlign = 'center';
+  for (let ci = 0; ci < st.sourceCols.length; ci++) {
+    const lines = wrappedCols[ci];
+    const cx = gridLeft + ci * cellW + cellW / 2;
+    const baseY = gridTop - headerInnerPad.bottom - (lines.length - 1) * lineH;
+    for (let li = 0; li < lines.length; li++) {
+      ctx.fillText(lines[li], cx, baseY + li * lineH);
+    }
+  }
+
+  // "Target" / "Distance" headers
+  ctx.font = '600 11px "JetBrains Mono", monospace';
+  ctx.fillStyle = '#b8bcc6';
+  ctx.textAlign = 'left';
+  ctx.fillText('Target', padding, gridTop - 6);
+  ctx.fillText('Distance', padding + rowLabelW, gridTop - 6);
+
+  const allRows = [...st.rows.map(r => ({ ...r, isAvg: false })),
+                    { label: 'Average', distance: st.avgDistance, values: st.avgValues, isAvg: true }];
+
+  for (let ri = 0; ri < allRows.length; ri++) {
+    const row = allRows[ri];
+    const y = gridTop + ri * cellH;
+
+    if (row.isAvg) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(padding, y); ctx.lineTo(W - padding, y); ctx.stroke();
+    }
+
+    // Row label
+    ctx.font = row.isAvg ? '700 11px "JetBrains Mono", monospace' : '400 11px "JetBrains Mono", monospace';
+    ctx.fillStyle = row.isAvg ? '#e2e4e9' : '#cfd2da';
+    ctx.textAlign = 'left';
+    ctx.fillText(row.label.length > 28 ? row.label.slice(0, 27) + '…' : row.label, padding, y + cellH / 2 + 4);
+
+    // Distance
+    ctx.font = '400 10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#8a8f9c';
+    ctx.fillText(isNaN(row.distance) ? 'N/A' : row.distance.toFixed(5), padding + rowLabelW, y + cellH / 2 + 4);
+
+    // Cells
+    for (let ci = 0; ci < row.values.length; ci++) {
+      const v = row.values[ci];
+      const x = gridLeft + ci * cellW;
+      ctx.fillStyle = heatColor(v);
+      ctx.fillRect(x, y + 2, cellW - 1, cellH - 3);
+
+      ctx.font = '600 9.5px "JetBrains Mono", monospace';
+      ctx.fillStyle = v > 25 ? '#0c0e12' : '#e2e4e9';
+      ctx.textAlign = 'center';
+      ctx.fillText(v.toFixed(1), x + cellW / 2, y + cellH / 2 + 4);
+    }
+  }
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `g25_mcmc_matrix_${ts}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flashBtn(btn, 'Saved ✓');
+  }, 'image/png');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN RUNNER
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -2028,6 +2568,8 @@ async function runAnalysis() {
   resultsSection.innerHTML = '<div class="results-header">Results</div>';
   resultsSection.classList.add('visible');
 
+  const allTargetSummaries = [];
+
   for (let tIdx = 0; tIdx < tgt.coords.length; tIdx++) {
     const targetVec = tgt.coords[tIdx];
     const targetLabel = tgt.labels[tIdx];
@@ -2119,6 +2661,12 @@ async function runAnalysis() {
     log('ok', '└─────────────────────────────────────────────────┘');
     log('', `  *** = 95% CI excludes zero`);
     log('', `  Fit RMSE: ${isNaN(rmse) ? 'N/A (empty chain)' : rmse.toFixed(6)}`);
+
+    allTargetSummaries.push({
+      label: targetLabel,
+      distance: rmse,
+      sources: summary.map(s => ({ name: s.source, pct: s.pctMean }))
+    });
 
     // Diagnostics
     const active = summary.filter(s => s.pctMean > 1);
@@ -2218,6 +2766,10 @@ async function runAnalysis() {
       const canvas = document.getElementById(`trace-${tIdx}-${i}`);
       if (canvas) drawTracePlot(canvas, mcmcResult.chain, idx, activeForPlots[i].source, CHART_COLORS[i % CHART_COLORS.length]);
     }
+  }
+
+  if (allTargetSummaries.length > 1) {
+    renderMatrixSection(allTargetSummaries);
   }
 
   progressWrap.style.display = 'none';
