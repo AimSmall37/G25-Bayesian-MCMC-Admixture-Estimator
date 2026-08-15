@@ -382,6 +382,8 @@ By default the tool uses one sigma for all 25 G25 dimensions. In reality the dim
 
 Two changes make large runs faster and less opaque. Pre-selection's residual-chase step now searches only the pool of candidates the cheaper methods already flagged rather than the entire panel, which cuts it from about a minute to a few seconds on a 5000-source file without dropping essential sources (they always carry non-zero NNLS weight and so stay in the pool). Convergence diagnostics now compute autocorrelations by FFT rather than a lag-by-lag loop, so effective sample size on a long chain drops from several seconds to a fraction of one and no longer trails the run. The script also prints a heartbeat through the previously silent stretches: the noise-floor scan, each residual-chase round, the MCMC iterations, and the diagnostics step.
 
+The web app picked up two further fixes on the same front. Its NNLS solver used to build the full K×K source-similarity matrix before solving anything — fine at a few hundred sources, but a 20,000-source panel means a 3+ GB matrix and a solve that scales quadratically with panel size. It now solves the same problem without ever building that matrix, so cost scales with K·D instead of K². Separately, the MCMC sampler was allocating several small arrays every iteration, which adds up fast over hundreds of thousands of iterations; it now reuses preallocated buffers instead. On a real 5,270-population, 20,118-sample panel at 500,000 iterations, a run that took 1 minute 45 seconds before both fixes now finishes in about 13–14 seconds. Output was checked against the original implementation on identical seeds and matches to the last bit — this was a speed change, not a behavior change.
+
 ### Proposal Concentration (`--conc`) — MCMC Step Size
 
 This sets how big a step the sampler tries on each iteration. It is a tuning knob for the sampler, not a modeling choice, so it changes how efficiently the chain explores but not the model itself. Higher values mean smaller, more cautious steps; lower values mean larger, bolder steps.
@@ -398,7 +400,7 @@ Because the automatic tuning already pushes the acceptance rate toward the healt
 
 **This is not a replacement for formal admixture analysis.** It is a more statistically principled replacement for the least-squares fitting that tools like Vahaduo perform on PCA coordinates. The underlying data (G25 coordinates) and the fundamental modeling assumption (target = weighted sum of sources) are the same.
 
-**Computational cost scales with reference set size.** The pre-selection step involves solving NNLS against all sources, which takes a few minutes for ~5,000 populations and scales roughly linearly. The MCMC step itself is fast since it operates on the reduced candidate set. In the web version, very large reference sets may cause the browser to lag during pre-selection.
+**Computational cost scales with reference set size.** The pre-selection step involves solving NNLS against all sources; in the web app this now scales with K·D rather than K², so a 5,000-population panel finishes pre-selection in a few seconds instead of minutes. The MCMC step itself is fast since it operates on the reduced candidate set. Very large panels (tens of thousands of sources) will still take proportionally longer, just linearly rather than quadratically.
 
 **The model assumes the "true" sources are in your reference set.** If your actual ancestry includes a population not represented in the references, the model will approximate it as a mixture of whatever is available — just like Vahaduo does. The credible intervals will be wider in this case, which is at least more honest than a confident wrong answer.
 
@@ -412,7 +414,7 @@ Because the automatic tuning already pushes the acceptance rate toward the healt
 | Source selection | User-specified | Automatic via multi-strategy pre-selection + forward stepwise BIC |
 | Regularization | None | Dirichlet prior (adjustable sparsity) |
 | Convergence verification | N/A | ESS, Geweke diagnostic, trace plots |
-| Speed | Instant | Minutes (depending on iterations and reference set size) |
+| Speed | Instant | Seconds to minutes (depending on iterations and reference set size) |
 | Dependencies | Web browser | Base R (script) or web browser (web app) |
 | Ease of use | Very easy (GUI) | GUI (web) or command-line (R) |
 

@@ -821,35 +821,65 @@ function weightedSum(w, sourceMat) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function solveNNLS(targetVec, sourceMat, maxIter = 2000, tol = 1e-8) {
+  // Gram-free coordinate descent. The original version precomputed the full
+  // K x K Gram matrix (StS), which costs O(K^2) time and memory — at
+  // K = 20,000 that's a ~3.2 GB array and ~1e12 flops per solve. Since each
+  // source only lives in D dimensions (D << K for any realistic G25 panel),
+  // we never need StS at all: we keep a running "predicted" vector
+  // (predicted = w^T * sourceMat, length D) and update it incrementally as
+  // each w_k changes. That reproduces the exact same update rule —
+  //   residual_k = Sty[k] - dot(S_k, predicted) + diag[k] * w[k]
+  // — because dot(S_k, predicted) = sum_j StS[k][j] * w[j]. Cost per sweep
+  // drops from O(K^2) to O(K*D); memory drops from O(K^2) to O(K + D).
   const K = sourceMat.length;
   const D = targetVec.length;
 
-  // Precompute StS and Sty
-  const StS = [];
-  for (let i = 0; i < K; i++) {
-    StS[i] = new Float64Array(K);
-    for (let j = 0; j < K; j++) {
-      StS[i][j] = dot(sourceMat[i], sourceMat[j]);
+  // Precompute per-source squared norm (diag of what would be StS) and Sty.
+  // Both are O(K*D), not O(K^2).
+  const diag = new Float64Array(K);
+  const Sty  = new Float64Array(K);
+  for (let k = 0; k < K; k++) {
+    const Sk = sourceMat[k];
+    let d = 0, sty = 0;
+    for (let i = 0; i < D; i++) {
+      d   += Sk[i] * Sk[i];
+      sty += Sk[i] * targetVec[i];
     }
+    diag[k] = d;
+    Sty[k]  = sty;
   }
-  const Sty = sourceMat.map(s => dot(s, targetVec));
 
   const w = new Float64Array(K);
+  const predicted = new Float64Array(D); // running w^T * sourceMat
 
   for (let iter = 0; iter < maxIter; iter++) {
     let maxChange = 0;
     for (let k = 0; k < K; k++) {
-      let residual_k = Sty[k];
-      for (let j = 0; j < K; j++) residual_k -= StS[k][j] * w[j];
-      residual_k += StS[k][k] * w[k];
-      const newVal = Math.max(0, residual_k / StS[k][k]);
-      maxChange = Math.max(maxChange, Math.abs(newVal - w[k]));
+      if (diag[k] === 0) continue; // degenerate all-zero source vector
+      const Sk = sourceMat[k];
+
+      // dot(S_k, predicted) replaces the StS-row dot product
+      let sp = 0;
+      for (let i = 0; i < D; i++) sp += Sk[i] * predicted[i];
+
+      const residual_k = Sty[k] - sp + diag[k] * w[k];
+      const newVal = Math.max(0, residual_k / diag[k]);
+      const delta = newVal - w[k];
+
+      if (delta !== 0) {
+        for (let i = 0; i < D; i++) predicted[i] += delta * Sk[i];
+      }
+      maxChange = Math.max(maxChange, Math.abs(delta));
       w[k] = newVal;
     }
-    // Normalise to simplex
+    // Normalise to simplex — rescale predicted by the same factor so it
+    // stays consistent with w without recomputing it from scratch.
     let s = 0;
     for (let k = 0; k < K; k++) s += w[k];
-    if (s > 0) for (let k = 0; k < K; k++) w[k] /= s;
+    if (s > 0) {
+      for (let k = 0; k < K; k++) w[k] /= s;
+      for (let i = 0; i < D; i++) predicted[i] /= s;
+    }
 
     if (maxChange < tol) break;
   }
@@ -1156,7 +1186,30 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
                  sampleSigma = false, sigmaPriorStrength = null) {
   const K = sourceMat.length;
   const D = targetVec.length;
-  let wCurrent = new Array(K).fill(1/K);
+
+  // ── Preallocated, reused buffers ──
+  // The original version allocated several small arrays (proposal weights,
+  // alpha vectors, predicted vector) EVERY iteration via .map()/weightedSum().
+  // At up to 500,000 iterations that's millions of short-lived array
+  // allocations feeding the garbage collector on top of the actual math. None
+  // of that is necessary: every buffer below is written into in place and
+  // reused for the life of the chain. wCurrent/wProposed are swapped by
+  // reference on acceptance instead of copied. The sequence of random draws
+  // (K gamma draws per proposal, then 1 uniform accept draw, then optionally
+  // 1 more gamma draw for sigma) is kept in exactly the same order as before,
+  // so for the same seed this produces a bit-identical chain — this is a
+  // pure performance change, not a behavioural one.
+  let wCurrent  = new Float64Array(K).fill(1 / K);
+  let wProposed = new Float64Array(K);
+  const alphaFwd = new Float64Array(K);
+  const alphaRev = new Float64Array(K);
+  const predBuf  = new Float64Array(D);
+
+  const sigmaHetero  = Array.isArray(sigma);
+  const sigmaBaseArr = sigmaHetero ? Float64Array.from(sigma) : null;
+  const sigmaCurArr  = sigmaHetero ? Float64Array.from(sigma) : null;
+  let sigmaCurScalar = sigmaHetero ? null : sigma;
+
   const nSave = Math.floor((nIter - burnin) / thin);
   const chain = [];
   const logPostTrace = new Float64Array(nIter);
@@ -1168,33 +1221,101 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
   // `sigma` is the BASE noise level (scalar or per-dimension array). In bayes
   // mode we sample a single scale k on top of it (effective sigma = k * base),
   // with an Inverse-Gamma prior on k^2 centred at 1 (on the empirical floor).
-  const sigmaBase = sigma;
-  const rmsBase = rmsOf(sigmaBase);
-  const scaleSigma = (base, s) => Array.isArray(base) ? base.map(x => x*s) : base*s;
+  const rmsBase = rmsOf(sigma);
   const nu0 = (sigmaPriorStrength && sigmaPriorStrength > 0) ? sigmaPriorStrength : D;
   const a0 = nu0/2 + 1, b0 = nu0/2;
   let k2 = 1;
-  let sigmaCur = sigmaBase;
   const sigmaSamples = sampleSigma ? [] : null;
 
-  let lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigmaCur, alpha);
+  // predBuf[d] = sum_k w[k] * sourceMat[k][d] — same accumulation order as
+  // the original weightedSum(), so results match bit-for-bit.
+  function computePredicted(w) {
+    predBuf.fill(0);
+    for (let k = 0; k < K; k++) {
+      const wk = w[k];
+      if (wk === 0) continue;
+      const Sk = sourceMat[k];
+      for (let d = 0; d < D; d++) predBuf[d] += wk * Sk[d];
+    }
+  }
+
+  function logLikelihoodFromPred(sigmaArrOrScalar) {
+    let ss = 0;
+    if (sigmaHetero) {
+      for (let d = 0; d < D; d++) {
+        const r = (targetVec[d] - predBuf[d]) / sigmaArrOrScalar[d];
+        ss += r * r;
+      }
+      return -ss / 2;
+    }
+    for (let d = 0; d < D; d++) {
+      const r = targetVec[d] - predBuf[d];
+      ss += r * r;
+    }
+    return -ss / (2 * sigmaArrOrScalar * sigmaArrOrScalar);
+  }
+
+  function logPriorDirichletArr(w) {
+    let s = 0;
+    for (let k = 0; k < K; k++) {
+      if (w[k] <= 0) return -Infinity;
+      s += Math.log(w[k]);
+    }
+    return (alpha - 1) * s;
+  }
+
+  function logPosteriorArr(w, sigmaArrOrScalar) {
+    const lp = logPriorDirichletArr(w);
+    if (!isFinite(lp)) return -Infinity;
+    computePredicted(w);
+    return lp + logLikelihoodFromPred(sigmaArrOrScalar);
+  }
+
+  function logDirichletDensityArr(x, alphaVec) {
+    let s1 = 0, s2 = 0, s3 = 0;
+    for (let k = 0; k < K; k++) {
+      if (x[k] <= 0) return -Infinity;
+      s1 += (alphaVec[k] - 1) * Math.log(x[k]);
+      s2 += lgamma(alphaVec[k]);
+      s3 += alphaVec[k];
+    }
+    return s1 - s2 + lgamma(s3);
+  }
+
+  let lpCurrent = logPosteriorArr(wCurrent, sigmaHetero ? sigmaCurArr : sigmaCurScalar);
 
   log('step', `  MCMC: ${nIter} iterations (burn-in: ${burnin}, thin: ${thin})${sampleSigma ? ' [sampling sigma]' : ''}`);
 
   for (let i = 0; i < nIter; i++) {
-    const prop = proposeDirichlet(wCurrent, conc);
-    const wProposed = prop.w;
-    const lpProposed = logPosterior(wProposed, targetVec, sourceMat, sigmaCur, alpha);
+    // Propose: Dirichlet centred on wCurrent. alphaFwd[k] only depends on
+    // wCurrent[k], so computing it and drawing its gamma variate in the same
+    // pass (rather than in two separate .map() sweeps like the original)
+    // draws randGamma(alpha[0]), randGamma(alpha[1]), ... in the exact same
+    // order as before.
+    let sSum = 0;
+    for (let k = 0; k < K; k++) {
+      const a = Math.max(0.01, conc * wCurrent[k]);
+      alphaFwd[k] = a;
+      const g = Math.max(randGamma(a), 1e-300);
+      wProposed[k] = g;
+      sSum += g;
+    }
+    for (let k = 0; k < K; k++) wProposed[k] /= sSum;
 
-    const alphaFwd = wCurrent.map(v => Math.max(0.01, conc * v));
-    const alphaRev = wProposed.map(v => Math.max(0.01, conc * v));
-    const logQFwd = logDirichletDensity(wProposed, alphaFwd);
-    const logQRev = logDirichletDensity(wCurrent, alphaRev);
+    const sigmaForEval = sigmaHetero ? sigmaCurArr : sigmaCurScalar;
+    const lpProposed = logPosteriorArr(wProposed, sigmaForEval);
+
+    for (let k = 0; k < K; k++) alphaRev[k] = Math.max(0.01, conc * wProposed[k]);
+    const logQFwd = logDirichletDensityArr(wProposed, alphaFwd);
+    const logQRev = logDirichletDensityArr(wCurrent, alphaRev);
 
     const logAlphaMH = (lpProposed - lpCurrent) + (logQRev - logQFwd);
 
     if (Math.log(rand()) < logAlphaMH) {
-      wCurrent = wProposed;
+      // Swap buffer references instead of copying — wProposed's contents
+      // become the new wCurrent, and the old wCurrent buffer is reused as
+      // scratch space (fully overwritten) on the next proposal.
+      const tmp = wCurrent; wCurrent = wProposed; wProposed = tmp;
       lpCurrent = lpProposed;
       acceptCount++;
       acceptSinceAdapt++;
@@ -1202,22 +1323,27 @@ function runMCMC(targetVec, sourceMat, sourceNames, nIter, burnin, thin, sigma, 
 
     // Gibbs update of the noise scale (bayes mode). Conjugate Inverse-Gamma.
     if (sampleSigma) {
-      const pred = weightedSum(wCurrent, sourceMat);
+      computePredicted(wCurrent);
       let uSS = 0;
-      if (Array.isArray(sigmaBase)) {
-        for (let d = 0; d < D; d++) { const r = (targetVec[d]-pred[d]) / sigmaBase[d]; uSS += r*r; }
+      if (sigmaHetero) {
+        for (let d = 0; d < D; d++) { const r = (targetVec[d]-predBuf[d]) / sigmaBaseArr[d]; uSS += r*r; }
       } else {
-        for (let d = 0; d < D; d++) { const r = targetVec[d]-pred[d]; uSS += r*r; } uSS /= (sigmaBase*sigmaBase);
+        for (let d = 0; d < D; d++) { const r = targetVec[d]-predBuf[d]; uSS += r*r; } uSS /= (sigma*sigma);
       }
       k2 = (b0 + uSS/2) / Math.max(randGamma(a0 + D/2), 1e-300);   // 1/Gamma(A,rate=B)
-      sigmaCur = scaleSigma(sigmaBase, Math.sqrt(k2));
-      lpCurrent = logPosterior(wCurrent, targetVec, sourceMat, sigmaCur, alpha);
+      const kScale = Math.sqrt(k2);
+      if (sigmaHetero) {
+        for (let d = 0; d < D; d++) sigmaCurArr[d] = sigmaBaseArr[d] * kScale;
+      } else {
+        sigmaCurScalar = sigma * kScale;
+      }
+      lpCurrent = logPosteriorArr(wCurrent, sigmaHetero ? sigmaCurArr : sigmaCurScalar);
     }
 
     logPostTrace[i] = lpCurrent;
 
     if (i >= burnin && ((i - burnin) % thin === 0)) {
-      chain.push(wCurrent.slice());
+      chain.push(Array.from(wCurrent)); // snapshot copy — wCurrent's buffer keeps getting reused
       if (sampleSigma) sigmaSamples.push(Math.sqrt(k2) * rmsBase);
     }
 
@@ -1908,10 +2034,14 @@ async function runAnalysis() {
 
     log('header', `\n──── Target: ${targetLabel} ────`);
 
+    const targetStartTime = performance.now();
+
     // Step 1: Pre-selection
     log('step', '\nStep 1: Pre-selecting candidate sources...');
     await new Promise(r => setTimeout(r, 20));
+    const t1Start = performance.now();
     const presel = preselectSources(targetVec, sourceCoords, sourceLabels, nKeep, log);
+    log('', `  [timing] Pre-selection: ${(performance.now() - t1Start).toFixed(0)} ms`);
     let selCoords = presel.indices.map(i => sourceCoords[i]);
     let selNames = presel.indices.map(i => sourceLabels[i]);
 
@@ -1933,9 +2063,11 @@ async function runAnalysis() {
     // Step 2: Forward selection (uses the base noise level)
     log('step', '\nStep 2: Forward stepwise model selection...');
     await new Promise(r => setTimeout(r, 20));
+    const t2Start = performance.now();
     const effectiveMaxK = maxK > 0 ? maxK : Math.min(12, selCoords.length);
     const effectiveMinK = maxK > 0 ? maxK : 2;
     const fwd = forwardSelect(targetVec, selCoords, selNames, sigmaBase, effectiveMaxK, effectiveMinK, log);
+    log('', `  [timing] Forward selection: ${(performance.now() - t2Start).toFixed(0)} ms`);
     selCoords = fwd.indices.map(i => selCoords[i]);
     selNames = fwd.indices.map(i => selNames[i]);
 
@@ -1945,6 +2077,7 @@ async function runAnalysis() {
     // Step 3: MCMC
     log('step', '\nStep 3: Running Bayesian MCMC...');
     await new Promise(r => setTimeout(r, 20));
+    const t3Start = performance.now();
 
     const mcmcResult = await new Promise(resolve => {
       setTimeout(() => {
@@ -1954,10 +2087,12 @@ async function runAnalysis() {
         resolve(result);
       }, 50);
     });
+    log('', `  [timing] MCMC: ${(performance.now() - t3Start).toFixed(0)} ms`);
 
     // Step 4: Summarise
     log('step', '\nStep 4: Summarising posteriors...');
     const summary = summarisePosterior(mcmcResult.chain, selNames);
+    log('ok', `  [timing] TOTAL for this target: ${(performance.now() - targetStartTime).toFixed(0)} ms`);
 
     // Fit quality
     let rmse = NaN;
