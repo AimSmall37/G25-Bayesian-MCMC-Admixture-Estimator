@@ -1737,14 +1737,49 @@ function flashBtn(btn, text) {
   setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1300);
 }
 
+// Robust clipboard copy. navigator.clipboard.writeText is only available in
+// secure contexts (https, or a real localhost server) — opening this file
+// directly (file://) or viewing it in some sandboxed/embedded contexts means
+// navigator.clipboard can be undefined entirely, which throws synchronously
+// and skips the .then()/.catch() below, so the button silently does nothing.
+// This wraps that path in a try/catch and falls back to a hidden-textarea +
+// document.execCommand('copy'), which works in those situations too.
+function copyToClipboard(text, btn) {
+  if (!text || !text.trim()) return;
+
+  function legacyCopy() {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.left = '-1000px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) flashBtn(btn, 'Copied ✓');
+    else flashBtn(btn, 'Copy failed');
+  }
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        flashBtn(btn, 'Copied ✓');
+      }).catch(() => {
+        legacyCopy();
+      });
+    } else {
+      legacyCopy();
+    }
+  } catch (e) {
+    legacyCopy();
+  }
+}
+
 function copyLog(btn) {
-  const text = logEl.innerText;
-  if (!text.trim()) return;
-  navigator.clipboard.writeText(text).then(() => {
-    flashBtn(btn, 'Copied ✓');
-  }).catch(() => {
-    flashBtn(btn, 'Copy failed');
-  });
+  copyToClipboard(logEl.innerText, btn);
 }
 
 function saveLog(btn) {
@@ -2256,11 +2291,7 @@ function copyMatrixAs(kind, btn) {
   const delim = kind === 'tsv' ? '\t' : ',';
   const text = matrixToDelimited(delim);
   if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    flashBtn(btn, 'Copied ✓');
-  }).catch(() => {
-    flashBtn(btn, 'Copy failed');
-  });
+  copyToClipboard(text, btn);
 }
 
 // Renders the current matrix state onto an offscreen canvas (sized to fit
